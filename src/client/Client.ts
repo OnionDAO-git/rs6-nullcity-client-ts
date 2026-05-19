@@ -5193,6 +5193,15 @@ export class Client extends GameShell {
             }
         }
 
+        if (this.localPlayer) {
+            const coordX: number = (this.localPlayer.x >> 7) + this.mapBuildBaseX;
+            const coordZ: number = (this.localPlayer.z >> 7) + this.mapBuildBaseZ;
+            const coordY: number = this.minusedlevel;
+            const coordText: string = 'X:' + coordX + ' Y:' + coordY + ' Z:' + coordZ;
+            this.p12?.drawString(coordText, 5, 27, Colour.BLACK);
+            this.p12?.drawString(coordText, 4, 26, Colour.YELLOW);
+        }
+
         if (this.rebootTimer !== 0) {
             let seconds: number = (this.rebootTimer / 50) | 0;
             const minutes: number = (seconds / 60) | 0;
