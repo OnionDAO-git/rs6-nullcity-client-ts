@@ -5964,6 +5964,18 @@ export class Client extends GameShell {
     }
 
     private ifButtonX(subId: number, op: number, comId: number): void {
+        if (RuneJsServerProt) {
+            const widgetId: number = comId >> 16;
+            const childId: number = subId !== 0 ? subId : comId & 0xffff;
+            const optionId: number = op - 1;
+
+            this.out.p1Enc(ClientProt.RESUME_PAUSEBUTTON);
+            this.out.p2(childId);
+            this.out.p2(widgetId);
+            this.out.p2_alt1(optionId);
+            return;
+        }
+
         const prot = [
             ClientProt.IF_BUTTON1,
             ClientProt.IF_BUTTON2,
@@ -7461,6 +7473,11 @@ export class Client extends GameShell {
                     stat = this.in.g1();
                     xp = this.in.g4();
                     level = this.in.g1();
+                }
+
+                if (stat < 0 || stat >= Skills.count) {
+                    this.ptype = -1;
+                    return true;
                 }
 
                 this.statXP[stat] = xp;
@@ -10136,9 +10153,11 @@ export class Client extends GameShell {
             const com = IfType.get(c);
             if (com && com.scripts && com.scripts[0] && com.scripts[0][0] === 5) {
                 const varp: number = com.scripts[0][1];
-                this.var[varp] = 1 - this.var[varp];
-                this.clientVar(varp);
-                this.redrawSide = true;
+                if (!RuneJsServerProt || varp !== 83) {
+                    this.var[varp] = 1 - this.var[varp];
+                    this.clientVar(varp);
+                    this.redrawSide = true;
+                }
             }
         }
 
@@ -12167,7 +12186,7 @@ export class Client extends GameShell {
                 com.text = `You last logged in ${text}`;
 
                 // custom: we're using localhost as a privacy flag for now
-                let ipStr = JString.formatIPv4(this.lastAddress);
+                const ipStr = JString.formatIPv4(this.lastAddress);
                 if (!ipStr.startsWith('127.')) {
                     com.text += ` from: ${this.dnsReq ?? ipStr}`;
                 }
