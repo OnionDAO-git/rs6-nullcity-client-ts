@@ -1,78 +1,79 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
+    <head>
+        <title>RuneScape 2</title>
 
-<head>
-    <title>RuneScape 2</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=0.7" />
 
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=0.7">
+        <style>
+            html {
+                touch-action: manipulation;
+            }
 
-    <style>
-        html {
-            touch-action: manipulation;
-        }
+            body,
+            td,
+            p {
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 12px;
+                color: white;
+            }
 
-        body,
-        td,
-        p {
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 12px;
-            color: white;
-        }
+            body {
+                margin: 0px 0px;
+                overflow: hidden;
+                background-color: black;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
 
-        body {
-            margin: 0px 0px;
-            overflow: auto;
-            background-color: black;
-        }
+            #game {
+                padding-left: 0;
+                padding-right: 0;
+                margin-left: auto;
+                margin-right: auto;
+                display: block;
+            }
 
-        #game {
-            padding-left: 0;
-            padding-right: 0;
-            margin-left: auto;
-            margin-right: auto;
-            display: block;
-        }
+            canvas {
+                width: min(100vw, calc(100vh * 765 / 503));
+                height: min(100vh, calc(100vw * 503 / 765));
+                aspect-ratio: 765 / 503;
+                display: block;
+                /* touch-action: none; */
+                -webkit-touch-callout: none;
+                -webkit-user-select: none;
+                -khtml-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+                outline: none;
+                -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
+                z-index: -1;
+                image-rendering: pixelated;
+            }
 
-        canvas {
-            width: 765px;
-            height: 503px;
-            display: block;
-            /* touch-action: none; */
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            -khtml-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-            outline: none;
-            -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
-            z-index: -1;
-            image-rendering: pixelated;
-        }
+            html:-webkit-full-screen {
+                background-color: black !important;
+            }
+        </style>
+    </head>
 
-        html:-webkit-full-screen {
-            background-color: black !important;
-        }
-    </style>
-</head>
+    <body>
+        <center>
+            <div id="game">
+                <canvas id="canvas" width="765" height="503"> Your browser is not capable of running our web client. </canvas>
+            </div>
+        </center>
 
-<body>
-    <center>
-        <div id="game">
-            <canvas id="canvas" width="765" height="503">
-                Your browser is not capable of running our web client.
-            </canvas>
-        </div>
-    </center>
+        <script type="module">
+            import { Client } from './client/client.js';
 
-    <script type="module">
-        import { Client } from './client/client.js';
-
-        (() => {
-            new Client(1, false, true);
-        })();
-    </script>
-</body>
-
+            (() => {
+                new Client(1, false, true);
+            })();
+        </script>
+    </body>
 </html>
