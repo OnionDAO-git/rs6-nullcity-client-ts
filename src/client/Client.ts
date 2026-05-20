@@ -103,6 +103,124 @@ const CAMERA_ZOOM_MAX = 512;
 const CAMERA_ZOOM_KEY_STEP = 32;
 const CAMERA_ZOOM_WHEEL_STEP = 96;
 
+export interface SpectatorRsPacketFrame {
+    opcode: number;
+    type: string;
+    updateTask: boolean;
+    payloadLength: number;
+    payloadBase64: string;
+    frameLength?: number;
+    frameBase64?: string;
+}
+
+interface RsStream {
+    readonly available: number;
+    write(src: Uint8Array, len: number): void;
+    read(): Promise<number>;
+    readBytes(dst: Uint8Array, off: number, len: number): Promise<void>;
+    close(): void;
+}
+
+class SpectatorClientStream implements RsStream {
+    private chunks: Uint8Array[] = [];
+    private offset = 0;
+    private closed = false;
+
+    get available(): number {
+        if (this.closed) {
+            return 0;
+        }
+
+        return this.chunks.reduce((total, chunk, index) => total + chunk.length - (index === 0 ? this.offset : 0), 0);
+    }
+
+    push(frame: SpectatorRsPacketFrame): void {
+        if (this.closed) {
+            return;
+        }
+
+        const payload = SpectatorClientStream.decodeBase64(frame.payloadBase64);
+        const declaredSize = ServerProtSizes[frame.opcode];
+        const headerLength = declaredSize === -2 ? 3 : declaredSize === -1 ? 2 : 1;
+        const bytes = new Uint8Array(headerLength + payload.length);
+        let pos = 0;
+        bytes[pos++] = frame.opcode & 0xff;
+        if (declaredSize === -1) {
+            bytes[pos++] = payload.length & 0xff;
+        } else if (declaredSize === -2) {
+            bytes[pos++] = (payload.length >> 8) & 0xff;
+            bytes[pos++] = payload.length & 0xff;
+        }
+        bytes.set(payload, pos);
+        this.chunks.push(bytes);
+    }
+
+    write(_src: Uint8Array, _len: number): void {
+        // Spectators are read-only. Gameplay packets produced by input handling are ignored.
+    }
+
+    async read(): Promise<number> {
+        const byte = this.takeByte();
+        return byte ?? -1;
+    }
+
+    async readBytes(dst: Uint8Array, off: number, len: number): Promise<void> {
+        for (let i = 0; i < len; i++) {
+            const byte = this.takeByte();
+            if (byte === undefined) {
+                throw new Error('spectator stream underflow');
+            }
+            dst[off + i] = byte;
+        }
+    }
+
+    close(): void {
+        this.closed = true;
+        this.chunks = [];
+        this.offset = 0;
+    }
+
+    private takeByte(): number | undefined {
+        while (this.chunks.length > 0) {
+            const head = this.chunks[0];
+            if (!head) {
+                this.chunks.shift();
+                this.offset = 0;
+                continue;
+            }
+
+            if (this.offset < head.length) {
+                return head[this.offset++];
+            }
+
+            this.chunks.shift();
+            this.offset = 0;
+        }
+
+        return undefined;
+    }
+
+    private static decodeBase64(value: string): Uint8Array {
+        const binary = atob(value);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    }
+}
+
+function rsSocketOptions(): { host: string; secured: boolean } {
+    const options = globalThis as typeof globalThis & {
+        __NULLCITY_RS_HOST__?: string;
+        __NULLCITY_RS_SECURE__?: boolean;
+    };
+    return {
+        host: options.__NULLCITY_RS_HOST__ || window.location.host,
+        secured: options.__NULLCITY_RS_SECURE__ ?? window.location.protocol === 'https:',
+    };
+}
+
 const enum ClientMainState {
     LOADING = 0,
     TITLE_LOADING = 5,
@@ -232,8 +350,11 @@ export class Client extends GameShell {
     private npcCount: number = 0;
     private npcIds: Int32Array = new Int32Array(32768);
 
-    private stream: ClientStream | null = null;
-    private static prevStream: ClientStream | null = null;
+    private stream: RsStream | null = null;
+    private static prevStream: RsStream | null = null;
+    private spectatorMode: boolean = false;
+    private spectatorReady: boolean = false;
+    private spectatorStream: SpectatorClientStream | null = null;
     private loginSeed: bigint = 0n;
     private static loginStep: number = 0;
     private static loginFailCount: number = 0;
@@ -628,6 +749,40 @@ export class Client extends GameShell {
         }
 
         this.run();
+    }
+
+    public enableSpectatorMode(): void {
+        if (!this.spectatorStream) {
+            this.spectatorStream = new SpectatorClientStream();
+        }
+        this.spectatorMode = true;
+        this.stream = this.spectatorStream;
+    }
+
+    public pushSpectatorPacket(frame: SpectatorRsPacketFrame): void {
+        this.enableSpectatorMode();
+        this.spectatorStream?.push(frame);
+    }
+
+    public override error(message: string): void {
+        if (!this.spectatorMode) {
+            super.error(message);
+            return;
+        }
+
+        if (this.alreadyerrored) {
+            return;
+        }
+
+        this.alreadyerrored = true;
+        window.parent?.postMessage(
+            {
+                type: 'nullcity:spectator-status',
+                text: `3D client error: ${message}`,
+            },
+            window.location.origin,
+        );
+        console.error(`error_game_${message}`);
     }
 
     static setLowMem(): void {
@@ -1641,7 +1796,11 @@ export class Client extends GameShell {
             await this.mainLoad();
             GameShell.doneslowupdate();
         } else if (Client.state === ClientMainState.TITLE) {
-            TitleScreen.loop();
+            if (this.spectatorMode && !this.spectatorReady) {
+                this.enterSpectatorGame();
+            } else {
+                TitleScreen.loop();
+            }
         } else if (Client.state === ClientMainState.LOGIN) {
             TitleScreen.loop();
             await this.loginPoll();
@@ -1799,7 +1958,8 @@ export class Client extends GameShell {
                 this.js5Socket = null;
                 this.js5SocketError = null;
                 const token = this.js5SocketToken;
-                this.js5SocketReq = ClientStream.openSocket(window.location.host, window.location.protocol === 'https:')
+                const socketOptions = rsSocketOptions();
+                this.js5SocketReq = ClientStream.openSocket(socketOptions.host, socketOptions.secured)
                     .then((socket) => {
                         if (token === this.js5SocketToken) {
                             this.js5Socket = socket;
@@ -1894,7 +2054,8 @@ export class Client extends GameShell {
             if (Client.loginStep === 1) {
                 if (!this.loginSocketReq) {
                     const token = this.loginSocketToken;
-                    this.loginSocketReq = ClientStream.openSocket(window.location.host, window.location.protocol === 'https:')
+                    const socketOptions = rsSocketOptions();
+                    this.loginSocketReq = ClientStream.openSocket(socketOptions.host, socketOptions.secured)
                         .then((socket) => {
                             if (token === this.loginSocketToken && (Client.state === ClientMainState.LOGIN || Client.state === ClientMainState.RECONNECT)) {
                                 this.loginSocket = socket;
@@ -2274,6 +2435,19 @@ export class Client extends GameShell {
             this.playerOpPriority[i] = false;
         }
 
+    }
+
+    private enterSpectatorGame(): void {
+        this.enableSpectatorMode();
+        this.staffmodlevel = 0;
+        this.mouseTracked = false;
+        this.selfSlot = LOCAL_PLAYER_INDEX;
+        this.membersAccount = 1;
+        this.loginDone();
+        this.mapBuildCentreZoneX = -1;
+        this.mapBuildCentreZoneZ = -1;
+        this.spectatorReady = true;
+        Client.setMainState(ClientMainState.GAME);
     }
 
     private reconnectDone(): void {
