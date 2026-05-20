@@ -1,5 +1,6 @@
 import '#3rdparty/audio.js';
 
+import AdminConsole from '#/client/AdminConsole.js';
 import ClientBuild from '#/client/ClientBuild.js';
 import { ClientCode } from '#/client/ClientCode.js';
 import ClientKeyboardListener from '#/client/ClientKeyboardListener.js';
@@ -98,7 +99,7 @@ const SCROLLBAR_GRIP_LOWLIGHT = 0x332d25;
 const CAMERA_DISTANCE_BASE = 600;
 const CAMERA_DISTANCE_PITCH_SCALE = 3;
 const CAMERA_ZOOM_MIN = -320;
-const CAMERA_ZOOM_MAX = 1536;
+const CAMERA_ZOOM_MAX = 512;
 const CAMERA_ZOOM_KEY_STEP = 32;
 const CAMERA_ZOOM_WHEEL_STEP = 96;
 
@@ -221,6 +222,11 @@ export class Client extends GameShell {
     public scripts: Js5Loader | null = null;
     private js5Net: Js5Net = new Js5Net();
     private js5Archives: Js5Loader[] = [];
+    private adminConsole: AdminConsole = new AdminConsole({
+        isAdmin: (): boolean => this.staffmodlevel >= 2,
+        sendCommand: (command: string): void => this.sendAdminConsoleCommand(command),
+        focusGame: (): void => canvas.focus()
+    });
 
     private npc: (ClientNpc | null)[] = new TypedArray1d(32768, null);
     private npcCount: number = 0;
@@ -1699,6 +1705,7 @@ export class Client extends GameShell {
     }
 
     protected override mainquit(): void {
+        this.adminConsole.destroy();
         ClientKeyboardListener.removeListeners(canvas);
         ClientMouseListener.removeListeners(canvas);
         ClientKeyboardListener.shutdown();
@@ -5460,6 +5467,23 @@ export class Client extends GameShell {
         }
     }
 
+    private sendAdminConsoleCommand(command: string): void {
+        if (!this.stream) {
+            throw new Error('Not connected.');
+        }
+
+        if (this.out.pos > 0) {
+            this.stream.write(this.out.data, this.out.pos);
+            this.out.pos = 0;
+        }
+
+        this.out.p1Enc(ClientProt.CLIENT_CONSOLE_COMMAND);
+        this.out.pjstr(command);
+        this.stream.write(this.out.data, this.out.pos);
+        this.out.pos = 0;
+        this.noTimeoutTimer = performance.now();
+    }
+
     private mapBuildLoop(): void {
         if (!this.maps || !this.mapBuildIndex || !this.mapBuildGroundData || !this.mapBuildLocationData) {
             return;
@@ -7243,16 +7267,14 @@ export class Client extends GameShell {
             }
 
             if (RuneJsServerProt && this.ptype === 83) {
-                this.addChat(0, this.in.gjstr(), '');
+                this.adminConsole.logServerMessage(this.in.gjstr());
 
                 this.ptype = -1;
                 return true;
             }
 
             if (RuneJsServerProt && this.ptype === 85) {
-                // RuneJS console commands are not exposed by this client UI.
-                this.in.gjstr();
-                this.in.gjstr();
+                this.adminConsole.addServerCommand(this.in.gjstr(), this.in.gjstr());
 
                 this.ptype = -1;
                 return true;
