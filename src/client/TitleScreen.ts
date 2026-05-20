@@ -196,11 +196,7 @@ export default class TitleScreen {
         TitleScreen.loginPass = '';
         TitleScreen.loginUser = '';
         TitleScreen.loginscreen = 0;
-        if (Client.midiVolume === 0 || Client.lowMem) {
-            MidiManager.stopWithFade();
-        } else if (Client.songs) {
-            MidiManager.playNamed(Client.songs, 'scape main', '', Client.midiVolume);
-        }
+        MidiManager.stopWithFade();
         // todo: Js5Net.sendLoginLogoutPacket here
         GameShell.fullredraw = true;
         TitleScreen.open = true;

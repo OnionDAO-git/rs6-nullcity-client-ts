@@ -34,6 +34,7 @@ export default class ClientMouseListener {
     static mouseButton: number = 0;
     static mouseClickButton: number = 0;
     static mouseClickTime: number = 0;
+    private static mouseWheelDelta: number = 0;
 
     private static readonly maxPointerEvents: number = 64;
     private static readonly pointerEvents: ClientPointerEventRecord[] = [];
@@ -48,6 +49,7 @@ export default class ClientMouseListener {
     private static readonly blur = (event: FocusEvent): void => ClientMouseListener.instance?.focusLost(event);
     private static readonly focus = (event: FocusEvent): void => ClientMouseListener.instance?.focusGained(event);
     private static readonly click = (event: MouseEvent): void => ClientMouseListener.instance?.mouseClicked(event);
+    private static readonly wheel = (event: WheelEvent): void => ClientMouseListener.instance?.mouseWheelMoved(event);
 
     static addListeners(target: HTMLElement): void {
         ClientMouseListener.touchActions.set(target, target.style.touchAction);
@@ -60,6 +62,7 @@ export default class ClientMouseListener {
         target.addEventListener('pointerleave', ClientMouseListener.pointerleave, false);
         target.addEventListener('pointercancel', ClientMouseListener.pointercancel, false);
         target.addEventListener('click', ClientMouseListener.click, false);
+        target.addEventListener('wheel', ClientMouseListener.wheel, { passive: false });
         target.addEventListener('blur', ClientMouseListener.blur, false);
         target.addEventListener('focus', ClientMouseListener.focus, false);
     }
@@ -72,6 +75,7 @@ export default class ClientMouseListener {
         target.removeEventListener('pointerleave', ClientMouseListener.pointerleave, false);
         target.removeEventListener('pointercancel', ClientMouseListener.pointercancel, false);
         target.removeEventListener('click', ClientMouseListener.click, false);
+        target.removeEventListener('wheel', ClientMouseListener.wheel, false);
         target.removeEventListener('blur', ClientMouseListener.blur, false);
         target.removeEventListener('focus', ClientMouseListener.focus, false);
 
@@ -113,6 +117,12 @@ export default class ClientMouseListener {
         return ClientMouseListener.pointerEvents.splice(0);
     }
 
+    static drainWheelDelta(): number {
+        const delta = ClientMouseListener.mouseWheelDelta;
+        ClientMouseListener.mouseWheelDelta = 0;
+        return delta;
+    }
+
     pointerDown(event: PointerEvent): void {
         this.recordPointerEvent('down', event);
 
@@ -144,6 +154,29 @@ export default class ClientMouseListener {
         if (event.button === 2) {
             event.preventDefault();
         }
+    }
+
+    mouseWheelMoved(event: WheelEvent): void {
+        if (!ClientMouseListener.instance) {
+            return;
+        }
+
+        ClientMouseListener.idleTimer = 0;
+        const pos = ClientMouseListener.getMousePos(event);
+        ClientMouseListener.nextMouseX = pos.x;
+        ClientMouseListener.nextMouseY = pos.y;
+
+        const lineHeight = 16;
+        const pageHeight = canvas.height;
+        if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+            ClientMouseListener.mouseWheelDelta += event.deltaY * lineHeight;
+        } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+            ClientMouseListener.mouseWheelDelta += event.deltaY * pageHeight;
+        } else {
+            ClientMouseListener.mouseWheelDelta += event.deltaY;
+        }
+
+        event.preventDefault();
     }
 
     pointerUp(event: PointerEvent): void {

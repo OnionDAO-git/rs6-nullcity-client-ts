@@ -10,6 +10,8 @@ import PointNormal from '#/dash3d/PointNormal.js';
 import ModelSource from '#/dash3d/ModelSource.js';
 import type Js5 from '#/js5/Js5.js';
 
+const FAR_CLIP = 5000;
+
 export default class Model extends ModelSource {
     static loaded: number = 0;
 
@@ -1783,7 +1785,7 @@ export default class Model extends ModelSource {
         const radiusCosEyePitch: number = (this.radius * cosEyePitch) >> 16;
 
         const maxZ: number = midZ + radiusCosEyePitch;
-        if (maxZ <= 50 || midZ >= 3500) {
+        if (maxZ <= 50 || midZ >= FAR_CLIP) {
             return;
         }
 

@@ -81,6 +81,11 @@ const TEXTURE_AVERAGE = Uint16Array.of(
 );
 
 const OCCLUDER_LEVELS = 4;
+const VIEW_DISTANCE_TILES = 32;
+const VIEW_DISTANCE_TILE_SPAN = VIEW_DISTANCE_TILES * 2;
+const VIS_BACKING_SIZE = VIEW_DISTANCE_TILE_SPAN + 1;
+const VIS_CALC_SIZE = VIS_BACKING_SIZE + 2;
+const FAR_CLIP = 5000;
 
 export default class World {
     static lowMem: boolean = true;
@@ -114,7 +119,7 @@ export default class World {
     static groundX: number = -1;
     static groundZ: number = -1;
 
-    private static visBacking: boolean[][][][] = new TypedArray4d(8, 32, 51, 51, false);
+    private static visBacking: boolean[][][][] = new TypedArray4d(8, 32, VIS_BACKING_SIZE, VIS_BACKING_SIZE, false);
     private static visBackingDirty: boolean[][] | null = null;
 
     static numActiveOccluders: number = 0;
@@ -864,7 +869,7 @@ export default class World {
         this.xOrig = (viewportWidth / 2) | 0;
         this.yOrig = (viewportHeight / 2) | 0;
 
-        const visBacking: boolean[][][][] = new TypedArray4d(9, 32, 53, 53, false);
+        const visBacking: boolean[][][][] = new TypedArray4d(9, 32, VIS_CALC_SIZE, VIS_CALC_SIZE, false);
         for (let pitch: number = 128; pitch <= 384; pitch += 32) {
             for (let yaw: number = 0; yaw < 2048; yaw += 64) {
                 this.cameraSinX = Pix3D.sinTable[pitch];
@@ -874,8 +879,8 @@ export default class World {
 
                 const pitchLevel: number = ((pitch - 128) / 32) | 0;
                 const yawLevel: number = (yaw / 64) | 0;
-                for (let dx: number = -26; dx <= 26; dx++) {
-                    for (let dz: number = -26; dz <= 26; dz++) {
+                for (let dx: number = -VIEW_DISTANCE_TILES - 1; dx <= VIEW_DISTANCE_TILES + 1; dx++) {
+                    for (let dz: number = -VIEW_DISTANCE_TILES - 1; dz <= VIEW_DISTANCE_TILES + 1; dz++) {
                         const x: number = dx * 128;
                         const z: number = dz * 128;
 
@@ -887,7 +892,7 @@ export default class World {
                             }
                         }
 
-                        visBacking[pitchLevel][yawLevel][dx + 25 + 1][dz + 25 + 1] = visible;
+                        visBacking[pitchLevel][yawLevel][dx + VIEW_DISTANCE_TILES + 1][dz + VIEW_DISTANCE_TILES + 1] = visible;
                     }
                 }
             }
@@ -895,35 +900,35 @@ export default class World {
 
         for (let pitchLevel: number = 0; pitchLevel < 8; pitchLevel++) {
             for (let yawLevel: number = 0; yawLevel < 32; yawLevel++) {
-                for (let x: number = -25; x < 25; x++) {
-                    for (let z: number = -25; z < 25; z++) {
+                for (let x: number = -VIEW_DISTANCE_TILES; x < VIEW_DISTANCE_TILES; x++) {
+                    for (let z: number = -VIEW_DISTANCE_TILES; z < VIEW_DISTANCE_TILES; z++) {
                         let visible: boolean = false;
 
                         check_areas: for (let dx: number = -1; dx <= 1; dx++) {
                             for (let dz: number = -1; dz <= 1; dz++) {
-                                if (visBacking[pitchLevel][yawLevel][x + dx + 25 + 1][z + dz + 25 + 1]) {
+                                if (visBacking[pitchLevel][yawLevel][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel][(yawLevel + 1) % 31][x + dx + 25 + 1][z + dz + 25 + 1]) {
+                                if (visBacking[pitchLevel][(yawLevel + 1) % 31][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel + 1][yawLevel][x + dx + 25 + 1][z + dz + 25 + 1]) {
+                                if (visBacking[pitchLevel + 1][yawLevel][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 31][x + dx + 25 + 1][z + dz + 25 + 1]) {
+                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 31][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
                             }
                         }
 
-                        this.visBacking[pitchLevel][yawLevel][x + 25][z + 25] = visible;
+                        this.visBacking[pitchLevel][yawLevel][x + VIEW_DISTANCE_TILES][z + VIEW_DISTANCE_TILES] = visible;
                     }
                 }
             }
@@ -936,7 +941,7 @@ export default class World {
         const pz: number = (y * this.cameraSinX + tmp * this.cameraCosX) >> 16;
         const py: number = (y * this.cameraCosX - tmp * this.cameraSinX) >> 16;
 
-        if (pz < 50 || pz > 3500) {
+        if (pz < 50 || pz > FAR_CLIP) {
             return false;
         }
 
@@ -980,22 +985,22 @@ export default class World {
         World.gz = (eyeZ / 128) | 0;
         World.maxLevel = maxLevel;
 
-        World.minX = World.gx - 25;
+        World.minX = World.gx - VIEW_DISTANCE_TILES;
         if (World.minX < 0) {
             World.minX = 0;
         }
 
-        World.minZ = World.gz - 25;
+        World.minZ = World.gz - VIEW_DISTANCE_TILES;
         if (World.minZ < 0) {
             World.minZ = 0;
         }
 
-        World.maxX = World.gx + 25;
+        World.maxX = World.gx + VIEW_DISTANCE_TILES;
         if (World.maxX > this.maxTileX) {
             World.maxX = this.maxTileX;
         }
 
-        World.maxZ = World.gz + 25;
+        World.maxZ = World.gz + VIEW_DISTANCE_TILES;
         if (World.maxZ > this.maxTileZ) {
             World.maxZ = this.maxTileZ;
         }
@@ -1012,7 +1017,7 @@ export default class World {
                         continue;
                     }
 
-                    if (tile.drawLevel <= maxLevel && (World.visBackingDirty[x + 25 - World.gx][z + 25 - World.gz] || this.groundh[level][x][z] - eyeY >= 2000)) {
+                    if (tile.drawLevel <= maxLevel && (World.visBackingDirty[x + VIEW_DISTANCE_TILES - World.gx][z + VIEW_DISTANCE_TILES - World.gz] || this.groundh[level][x][z] - eyeY >= 2000)) {
                         tile.drawFront = true;
                         tile.drawBack = true;
                         tile.drawSprites = tile.spriteCount > 0;
@@ -1028,7 +1033,7 @@ export default class World {
 
         for (let level: number = this.minLevel; level < this.maxTileLevel; level++) {
             const tiles: (Square | null)[][] = this.squares[level];
-            for (let dx: number = -25; dx <= 0; dx++) {
+            for (let dx: number = -VIEW_DISTANCE_TILES; dx <= 0; dx++) {
                 const rightTileX: number = World.gx + dx;
                 const leftTileX: number = World.gx - dx;
 
@@ -1036,7 +1041,7 @@ export default class World {
                     continue;
                 }
 
-                for (let dz: number = -25; dz <= 0; dz++) {
+                for (let dz: number = -VIEW_DISTANCE_TILES; dz <= 0; dz++) {
                     const forwardTileZ: number = World.gz + dz;
                     const backwardTileZ: number = World.gz - dz;
                     let tile: Square | null;
@@ -1083,7 +1088,7 @@ export default class World {
 
         for (let level: number = this.minLevel; level < this.maxTileLevel; level++) {
             const tiles: (Square | null)[][] = this.squares[level];
-            for (let dx: number = -25; dx <= 0; dx++) {
+            for (let dx: number = -VIEW_DISTANCE_TILES; dx <= 0; dx++) {
                 const rightTileX: number = World.gx + dx;
                 const leftTileX: number = World.gx - dx;
 
@@ -1091,7 +1096,7 @@ export default class World {
                     continue;
                 }
 
-                for (let dz: number = -25; dz <= 0; dz++) {
+                for (let dz: number = -VIEW_DISTANCE_TILES; dz <= 0; dz++) {
                     const forwardTileZ: number = World.gz + dz;
                     const backgroundTileZ: number = World.gz - dz;
                     let tile: Square | null;
@@ -1253,16 +1258,16 @@ export default class World {
             let deltaMaxTileX: number;
 
             if (occluder.type === 1) {
-                deltaMaxY = occluder.minTileX + 25 - World.gx;
-                if (deltaMaxY >= 0 && deltaMaxY <= 50) {
-                    deltaMinTileZ = occluder.minTileZ + 25 - World.gz;
+                deltaMaxY = occluder.minTileX + VIEW_DISTANCE_TILES - World.gx;
+                if (deltaMaxY >= 0 && deltaMaxY <= VIEW_DISTANCE_TILE_SPAN) {
+                    deltaMinTileZ = occluder.minTileZ + VIEW_DISTANCE_TILES - World.gz;
                     if (deltaMinTileZ < 0) {
                         deltaMinTileZ = 0;
                     }
 
-                    deltaMaxTileZ = occluder.maxTileZ + 25 - World.gz;
-                    if (deltaMaxTileZ > 50) {
-                        deltaMaxTileZ = 50;
+                    deltaMaxTileZ = occluder.maxTileZ + VIEW_DISTANCE_TILES - World.gz;
+                    if (deltaMaxTileZ > VIEW_DISTANCE_TILE_SPAN) {
+                        deltaMaxTileZ = VIEW_DISTANCE_TILE_SPAN;
                     }
 
                     let ok: boolean = false;
@@ -1294,17 +1299,17 @@ export default class World {
                     }
                 }
             } else if (occluder.type === 2) {
-                deltaMaxY = occluder.minTileZ + 25 - World.gz;
+                deltaMaxY = occluder.minTileZ + VIEW_DISTANCE_TILES - World.gz;
 
-                if (deltaMaxY >= 0 && deltaMaxY <= 50) {
-                    deltaMinTileZ = occluder.minTileX + 25 - World.gx;
+                if (deltaMaxY >= 0 && deltaMaxY <= VIEW_DISTANCE_TILE_SPAN) {
+                    deltaMinTileZ = occluder.minTileX + VIEW_DISTANCE_TILES - World.gx;
                     if (deltaMinTileZ < 0) {
                         deltaMinTileZ = 0;
                     }
 
-                    deltaMaxTileZ = occluder.maxTileX + 25 - World.gx;
-                    if (deltaMaxTileZ > 50) {
-                        deltaMaxTileZ = 50;
+                    deltaMaxTileZ = occluder.maxTileX + VIEW_DISTANCE_TILES - World.gx;
+                    if (deltaMaxTileZ > VIEW_DISTANCE_TILE_SPAN) {
+                        deltaMaxTileZ = VIEW_DISTANCE_TILE_SPAN;
                     }
 
                     let ok: boolean = false;
@@ -1339,25 +1344,25 @@ export default class World {
                 deltaMaxY = occluder.minY - World.cy;
 
                 if (deltaMaxY > 128) {
-                    deltaMinTileZ = occluder.minTileZ + 25 - World.gz;
+                    deltaMinTileZ = occluder.minTileZ + VIEW_DISTANCE_TILES - World.gz;
                     if (deltaMinTileZ < 0) {
                         deltaMinTileZ = 0;
                     }
 
-                    deltaMaxTileZ = occluder.maxTileZ + 25 - World.gz;
-                    if (deltaMaxTileZ > 50) {
-                        deltaMaxTileZ = 50;
+                    deltaMaxTileZ = occluder.maxTileZ + VIEW_DISTANCE_TILES - World.gz;
+                    if (deltaMaxTileZ > VIEW_DISTANCE_TILE_SPAN) {
+                        deltaMaxTileZ = VIEW_DISTANCE_TILE_SPAN;
                     }
 
                     if (deltaMinTileZ <= deltaMaxTileZ) {
-                        let deltaMinTileX: number = occluder.minTileX + 25 - World.gx;
+                        let deltaMinTileX: number = occluder.minTileX + VIEW_DISTANCE_TILES - World.gx;
                         if (deltaMinTileX < 0) {
                             deltaMinTileX = 0;
                         }
 
-                        deltaMaxTileX = occluder.maxTileX + 25 - World.gx;
-                        if (deltaMaxTileX > 50) {
-                            deltaMaxTileX = 50;
+                        deltaMaxTileX = occluder.maxTileX + VIEW_DISTANCE_TILES - World.gx;
+                        if (deltaMaxTileX > VIEW_DISTANCE_TILE_SPAN) {
+                            deltaMaxTileX = VIEW_DISTANCE_TILE_SPAN;
                         }
 
                         let ok: boolean = false;

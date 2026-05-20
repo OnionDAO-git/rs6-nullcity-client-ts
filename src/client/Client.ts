@@ -95,6 +95,12 @@ const SCROLLBAR_TRACK = 0x23201b;
 const SCROLLBAR_GRIP_FOREGROUND = 0x4d4233;
 const SCROLLBAR_GRIP_HIGHLIGHT = 0x766654;
 const SCROLLBAR_GRIP_LOWLIGHT = 0x332d25;
+const CAMERA_DISTANCE_BASE = 600;
+const CAMERA_DISTANCE_PITCH_SCALE = 3;
+const CAMERA_ZOOM_MIN = -320;
+const CAMERA_ZOOM_MAX = 1536;
+const CAMERA_ZOOM_KEY_STEP = 32;
+const CAMERA_ZOOM_WHEEL_STEP = 96;
 
 const enum ClientMainState {
     LOADING = 0,
@@ -376,6 +382,8 @@ export class Client extends GameShell {
     private orbitCameraPitchVelocity: number = 0;
     private orbitCameraX: number = 0;
     private orbitCameraZ: number = 0;
+    private cameraZoom: number = 0;
+    private cameraZoomTarget: number = 0;
     private sendCameraDelay: number = 0;
     private sendCamera: boolean = false;
     private cameraPitchClamp: number = 0;
@@ -745,7 +753,7 @@ export class Client extends GameShell {
             const distance: Int32Array = new Int32Array(9);
             for (let x: number = 0; x < 9; x++) {
                 const angle: number = (x * 32 + 128 + 15) | 0;
-                const offset: number = (angle * 3 + 600) | 0;
+                const offset: number = (angle * CAMERA_DISTANCE_PITCH_SCALE + CAMERA_DISTANCE_BASE + CAMERA_ZOOM_MAX) | 0;
                 const sin: number = Pix3D.sinTable[angle];
                 distance[x] = (offset * sin) >> 16;
             }
@@ -1618,6 +1626,7 @@ export class Client extends GameShell {
         ClientKeyboardListener.loop();
         ClientMouseListener.loop();
         this.processPointerInput(ClientMouseListener.drainPointerEvents());
+        this.processCameraZoomWheel(ClientMouseListener.drainWheelDelta());
 
         if (Client.state === ClientMainState.LOADING) {
             await this.mainLoad();
@@ -3534,6 +3543,16 @@ export class Client extends GameShell {
             this.orbitCameraPitch = 383;
         }
 
+        if (!this.isGameObscured()) {
+            if (ClientKeyboardListener.keyHeld[104] === 1) {
+                this.adjustCameraZoom(-CAMERA_ZOOM_KEY_STEP);
+            } else if (ClientKeyboardListener.keyHeld[105] === 1) {
+                this.adjustCameraZoom(CAMERA_ZOOM_KEY_STEP);
+            }
+        }
+
+        this.updateCameraZoom();
+
         const orbitTileX: number = this.orbitCameraX >> 7;
         const orbitTileZ: number = this.orbitCameraZ >> 7;
         const orbitY: number = this.getAvH(this.orbitCameraX, this.orbitCameraZ, this.minusedlevel);
@@ -4548,7 +4567,7 @@ export class Client extends GameShell {
             const yaw: number = (this.orbitCameraYaw + this.macroCameraAngle) & 0x7ff;
 
             if (this.localPlayer) {
-                this.camFollow(pitch, this.orbitCameraX, this.getAvH(this.localPlayer.x, this.localPlayer.z, this.minusedlevel) - 50, yaw, this.orbitCameraZ, pitch * 3 + 600);
+                this.camFollow(pitch, this.orbitCameraX, this.getAvH(this.localPlayer.x, this.localPlayer.z, this.minusedlevel) - 50, yaw, this.orbitCameraZ, this.getCameraDistance(pitch));
             }
         }
 
@@ -4786,6 +4805,36 @@ export class Client extends GameShell {
         this.camZ = targetZ - z;
         this.camPitch = pitch;
         this.camYaw = yaw;
+    }
+
+    private getCameraDistance(pitch: number): number {
+        return pitch * CAMERA_DISTANCE_PITCH_SCALE + CAMERA_DISTANCE_BASE + this.cameraZoom;
+    }
+
+    private processCameraZoomWheel(delta: number): void {
+        if (delta === 0 || !this.insideGame() || this.isGameObscured()) {
+            return;
+        }
+
+        const steps = Math.max(-4, Math.min(4, delta / 100));
+        this.adjustCameraZoom(steps * CAMERA_ZOOM_WHEEL_STEP);
+    }
+
+    private adjustCameraZoom(delta: number): void {
+        this.cameraZoomTarget = Math.max(CAMERA_ZOOM_MIN, Math.min(CAMERA_ZOOM_MAX, this.cameraZoomTarget + delta));
+    }
+
+    private updateCameraZoom(): void {
+        if (this.cameraZoom === this.cameraZoomTarget) {
+            return;
+        }
+
+        const delta = this.cameraZoomTarget - this.cameraZoom;
+        if (Math.abs(delta) < 4) {
+            this.cameraZoom = this.cameraZoomTarget;
+        } else {
+            this.cameraZoom += (delta / 4) | 0;
+        }
     }
 
     private roofCheck2(): number {
