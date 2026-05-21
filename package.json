@@ -8,7 +8,8 @@
     },
     "scripts": {
         "build": "bun run bundle.ts",
-        "build:dev": "bun run bundle.ts dev"
+        "build:dev": "bun run bundle.ts dev",
+        "dev": "bun run build:dev && cp out/client.js public/client && bun run proxy"
     },
     "dependencies": {
         "fflate": "^0.8.2"

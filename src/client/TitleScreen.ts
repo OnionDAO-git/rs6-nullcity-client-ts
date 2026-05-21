@@ -60,6 +60,12 @@ export default class TitleScreen {
         TitleScreen.loginMes1 = line1;
     }
 
+    private static submitLogin(): void {
+        TitleScreen.loginUser = JString.toLoginUsername(TitleScreen.loginUser);
+        TitleScreen.loginMes('', '', 'Connecting to server...');
+        Client.setMainState(20);
+    }
+
     static readyMax(): number {
         return 5;
     }
@@ -261,9 +267,7 @@ export default class TitleScreen {
             } else if (click === 1 && mouseY >= 90 && mouseY < 105) {
                 TitleScreen.loginSelect = 1;
             } else if (click === 1 && mouseX >= 25 && mouseX <= 175 && mouseY >= 130 && mouseY <= 170) {
-                TitleScreen.loginUser = JString.toLoginUsername(TitleScreen.loginUser);
-                TitleScreen.loginMes('', '', 'Connecting to server...');
-                Client.setMainState(20);
+                TitleScreen.submitLogin();
                 return;
             } else if (click === 1 && mouseX >= 185 && mouseX <= 335 && mouseY >= 130 && mouseY <= 170) {
                 TitleScreen.loginUser = '';
@@ -285,7 +289,11 @@ export default class TitleScreen {
                     if (ClientKeyboardListener.code === 85 && TitleScreen.loginUser.length > 0) {
                         TitleScreen.loginUser = TitleScreen.loginUser.substring(0, TitleScreen.loginUser.length - 1);
                     }
-                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
+                    if (ClientKeyboardListener.code === 84) {
+                        TitleScreen.submitLogin();
+                        return;
+                    }
+                    if (ClientKeyboardListener.code === 80) {
                         TitleScreen.loginSelect = 1;
                     }
                     if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginUser.length < 12) {
@@ -295,7 +303,11 @@ export default class TitleScreen {
                     if (ClientKeyboardListener.code === 85 && TitleScreen.loginPass.length > 0) {
                         TitleScreen.loginPass = TitleScreen.loginPass.substring(0, TitleScreen.loginPass.length - 1);
                     }
-                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
+                    if (ClientKeyboardListener.code === 84) {
+                        TitleScreen.submitLogin();
+                        return;
+                    }
+                    if (ClientKeyboardListener.code === 80) {
                         TitleScreen.loginSelect = 0;
                     }
                     if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginPass.length < 20) {
@@ -310,7 +322,7 @@ export default class TitleScreen {
         }
     }
 
-    static draw(b12: PixFont | null, p11: PixFont | null, state: number): void {
+    static draw(b12: PixFont | null, _p11: PixFont | null, state: number): void {
         TitleScreen.imageTitle4?.setPixels();
 
         if (state === 0 || state === 5) {
