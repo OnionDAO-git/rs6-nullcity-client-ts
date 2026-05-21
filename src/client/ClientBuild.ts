@@ -606,7 +606,7 @@ export default class ClientBuild {
         for (let level: number = 0; level < BuildArea.LEVELS; level++) {
             for (let x: number = 0; x < 64; x++) {
                 for (let z: number = 0; z < 64; z++) {
-                    if (xOffset + x > 0 && xOffset + x < 103 && zOffset + z > 0 && zOffset + z < 103) {
+                    if (xOffset + x > 0 && xOffset + x < BuildArea.SIZE - 1 && zOffset + z > 0 && zOffset + z < BuildArea.SIZE - 1) {
                         const collision: CollisionMap | null = collisions[level];
                         if (collision) {
                             collision.flags[CollisionMap.index(xOffset + x, zOffset + z)] &= 0xfeffffff;
@@ -629,7 +629,7 @@ export default class ClientBuild {
     loadGroundRegion(src: Uint8Array, dstLevel: number, dstX: number, dstZ: number, srcLevel: number, srcX: number, srcZ: number, rotation: number, collisions: (CollisionMap | null)[]): void {
         for (let x = 0; x < 8; x++) {
             for (let z = 0; z < 8; z++) {
-                if (dstX + x > 0 && dstX + x < 103 && dstZ + z > 0 && dstZ + z < 103) {
+                if (dstX + x > 0 && dstX + x < BuildArea.SIZE - 1 && dstZ + z > 0 && dstZ + z < BuildArea.SIZE - 1) {
                     const collision = collisions[dstLevel];
                     if (collision) {
                         collision.flags[CollisionMap.index(dstX + x, dstZ + z)] &= 0xfeffffff;
@@ -719,7 +719,7 @@ export default class ClientBuild {
                     const stx = xOffset + x;
                     const stz = zOffset + z;
 
-                    if (stx > 0 && stz > 0 && stx < 103 && stz < 103) {
+                    if (stx > 0 && stz > 0 && stx < BuildArea.SIZE - 1 && stz < BuildArea.SIZE - 1) {
                         const loc = LocType.list(locId);
                         if (shape != 22 || !ClientBuild.lowMem || loc.active !== 0 || loc.forcedecor) {
                             if (!loc.checkModelAll()) {
@@ -816,7 +816,7 @@ export default class ClientBuild {
                     const tx = dstX + RegionRotate.DX(locRotation, loc.width, x & 0x7, loc.length, rotation, z & 0x7);
                     const tz = dstZ + RegionRotate.DZ(z & 0x7, loc.length, x & 0x7, loc.width, rotation, locRotation);
 
-                    if (tx > 0 && tz > 0 && tx < 103 && tz < 103) {
+                    if (tx > 0 && tz > 0 && tx < BuildArea.SIZE - 1 && tz < BuildArea.SIZE - 1) {
                         let currentLevel = dstLevel;
                         if ((this.mapl[1][tx][tz] & MapFlag.LinkBelow) !== 0) {
                             currentLevel = dstLevel - 1;

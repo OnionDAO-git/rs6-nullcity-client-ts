@@ -2,12 +2,40 @@ import { CollisionFlag } from '#/dash3d/CollisionFlag.js';
 import { DirectionFlag } from '#/dash3d/DirectionFlag.js';
 import { LocAngle } from '#/dash3d/LocAngle.js';
 import { LocShape } from '#/dash3d/LocShape.js';
+import ClientConfig from '#/client/ClientConfig.js';
 
-// a standard build area is 4x13x13 zones, or 4x104x104 tiles
-export const enum BuildArea {
-    LEVELS = 4,
-    SIZE = 13 << 3
-}
+// A 1x build area is the legacy 4x13x13 zones, or 4x104x104 tiles.
+export const BuildArea = {
+    LEVELS: 4,
+    BASE_ZONES: 13,
+    REGION_MODE_ZONES: 13,
+    BASE_ZONE_RADIUS: 6,
+    SCALE: ClientConfig.mapBuildAreaScale,
+    RADIUS_ZONES: ClientConfig.mapBuildAreaRadiusZones,
+    ZONES: ClientConfig.mapBuildAreaZones,
+    SIZE: ClientConfig.mapBuildAreaTiles,
+    get TILE_COUNT(): number {
+        return this.SIZE * this.SIZE;
+    },
+    get START_ZONE_OFFSET(): number {
+        return this.RADIUS_ZONES;
+    },
+    startZone(centreZone: number): number {
+        return centreZone - this.START_ZONE_OFFSET;
+    },
+    endZoneExclusive(centreZone: number): number {
+        return this.startZone(centreZone) + this.ZONES;
+    },
+    endZoneInclusive(centreZone: number): number {
+        return this.endZoneExclusive(centreZone) - 1;
+    },
+    regionStart(centreZone: number): number {
+        return (this.startZone(centreZone) / 8) | 0;
+    },
+    regionEnd(centreZone: number): number {
+        return (this.endZoneInclusive(centreZone) / 8) | 0;
+    }
+};
 
 export default class CollisionMap {
     static index = (x: number, z: number): number => x * BuildArea.SIZE + z;

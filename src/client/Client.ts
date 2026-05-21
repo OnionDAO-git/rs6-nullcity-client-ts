@@ -4,6 +4,7 @@ import AdminConsole from '#/client/AdminConsole.js';
 import ClientBuild from '#/client/ClientBuild.js';
 import { ClientCode } from '#/client/ClientCode.js';
 import ClientKeyboardListener from '#/client/ClientKeyboardListener.js';
+import ClientLayout, { ClientArea, type ClientLayoutState } from '#/client/ClientLayout.js';
 import ClientMouseListener from '#/client/ClientMouseListener.js';
 import type { ClientPointerEventRecord } from '#/client/ClientMouseListener.js';
 import GameShell from '#/client/GameShell.js';
@@ -102,6 +103,39 @@ const CAMERA_ZOOM_MIN = -320;
 const CAMERA_ZOOM_MAX = 512;
 const CAMERA_ZOOM_KEY_STEP = 32;
 const CAMERA_ZOOM_WHEEL_STEP = 96;
+const CAMERA_VISIBILITY_FRUSTUM_START = 500 + CAMERA_ZOOM_MAX - CAMERA_ZOOM_MIN;
+const CAMERA_VISIBILITY_FRUSTUM_END = 800;
+
+const CHAT_HISTORY_HEIGHT = 77;
+const CHAT_SCROLLBAR_X = 463;
+const CHAT_OPTIONS_WIDTH = 409;
+const CHAT_MODE_BUTTONS = [
+    { x1: 6, x2: 106 },
+    { x1: 135, x2: 235 },
+    { x1: 273, x2: 373 },
+    { x1: 412, x2: 512 }
+];
+const SIDE_TOP_TAB_BOUNDS = [
+    { x1: -14, x2: 20, y1: -36, y2: 0 },
+    { x1: 16, x2: 46, y1: -37, y2: 0 },
+    { x1: 44, x2: 74, y1: -37, y2: 0 },
+    { x1: 72, x2: 116, y1: -37, y2: -2 },
+    { x1: 113, x2: 143, y1: -37, y2: 0 },
+    { x1: 141, x2: 171, y1: -37, y2: 0 },
+    { x1: 169, x2: 203, y1: -36, y2: 0 }
+];
+const SIDE_BOTTOM_TAB_BOUNDS = [
+    { x1: -13, x2: 21, y1: -37, y2: -1 },
+    { x1: 19, x2: 49, y1: -37, y2: 0 },
+    { x1: 46, x2: 76, y1: -37, y2: 0 },
+    { x1: 74, x2: 118, y1: -36, y2: -1 },
+    { x1: 116, x2: 146, y1: -37, y2: 0 },
+    { x1: 143, x2: 173, y1: -37, y2: 0 },
+    { x1: 171, x2: 205, y1: -37, y2: -1 }
+];
+const MINIMAP_BUFFER_MARGIN = 48;
+const MINIMAP_TILE_SCALE = 4;
+const LEGACY_MINIMAP_BUFFER_SIZE = 512;
 
 export interface SpectatorRsPacketFrame {
     opcode: number;
@@ -389,13 +423,15 @@ export class Client extends GameShell {
     private regionMode: boolean = false;
     private mapBuildCentreZoneX: number = 0;
     private mapBuildCentreZoneZ: number = 0;
+    private mapBuildRadiusZones: number = BuildArea.RADIUS_ZONES;
+    private mapBuildLocalCoordBits: number = 7;
     private mapBuildIndex: Int32Array | null = null;
     private mapBuildGroundFile: number[] = [];
     private mapBuildLocationFile: number[] = [];
     private mapBuildGroundData: (Uint8Array | null)[] | null = null;
     private mapBuildLocationData: (Uint8Array | null)[] | null = null;
     private mapKeys: Int32Array[] = [];
-    private mapBuildRegionSrc: Int32Array[][] = new Int32Array3d(4, 13, 13);
+    private mapBuildRegionSrc: Int32Array[][] = new Int32Array3d(BuildArea.LEVELS, BuildArea.REGION_MODE_ZONES, BuildArea.REGION_MODE_ZONES);
     private world: World | null = null;
     private mapl: Uint8Array[][] | null = null;
     private groundh: Int32Array[][] | null = null;
@@ -407,8 +443,8 @@ export class Client extends GameShell {
     private tryMoveNearest: number = 0;
     private dirMap: Int32Array = new Int32Array(BuildArea.SIZE * BuildArea.SIZE);
     private distMap: Int32Array = new Int32Array(BuildArea.SIZE * BuildArea.SIZE);
-    private routeX: Int32Array = new Int32Array(4000);
-    private routeZ: Int32Array = new Int32Array(4000);
+    private routeX: Int32Array = new Int32Array(BuildArea.TILE_COUNT);
+    private routeZ: Int32Array = new Int32Array(BuildArea.TILE_COUNT);
 
     private macroCameraX: number = 0;
     private macroCameraXModifier: number = 2;
@@ -681,9 +717,9 @@ export class Client extends GameShell {
     private minimapState: number = 0;
     private minimapLevel: number = -1;
     private activeMapFunctionCount: number = 0;
-    private activeMapFunctionX: Int32Array = new Int32Array(1000);
-    private activeMapFunctionZ: Int32Array = new Int32Array(1000);
-    private activeMapFunctions: (Pix32 | null)[] = new TypedArray1d(1000, null);
+    private activeMapFunctionX: Int32Array = new Int32Array(BuildArea.TILE_COUNT);
+    private activeMapFunctionZ: Int32Array = new Int32Array(BuildArea.TILE_COUNT);
+    private activeMapFunctions: (Pix32 | null)[] = new TypedArray1d(BuildArea.TILE_COUNT, null);
     private minimapFlagX: number = 0;
     private minimapFlagZ: number = 0;
 
@@ -833,22 +869,26 @@ export class Client extends GameShell {
         }
 
         if (state === ClientMainState.FULLSCREEN) {
+            GameShell.useResizableFrame(false);
             Client.unloadFrame();
             TitleScreen.close();
             if (!GameShell.drawArea) {
-                GameShell.drawArea = new PixMap(765, 503);
+                const frame = ClientLayout.current.frame;
+                GameShell.drawArea = new PixMap(frame.width, frame.height);
             }
         }
 
         if (state === ClientMainState.TITLE_LOADING || state === ClientMainState.TITLE || state === ClientMainState.LOGIN) {
+            GameShell.useLegacyFrame(false);
             GameShell.drawArea = null;
             Client.unloadFrame();
             if (Client.binary && Client.sprites) {
-                TitleScreen.init(Client.binary, Client.sprites, canvas.width);
+                TitleScreen.init(Client.binary, Client.sprites, ClientLayout.LEGACY_FRAME_WIDTH);
             }
         }
 
         if (state === ClientMainState.MAP_BUILD || state === ClientMainState.GAME || state === ClientMainState.RECONNECT) {
+            GameShell.useResizableFrame(false);
             GameShell.drawArea = null;
             TitleScreen.close();
             Client.loadFrame();
@@ -895,6 +935,35 @@ export class Client extends GameShell {
         Client.setMainState(ClientMainState.LOADING);
     }
 
+    protected override canvasResize(_state: ClientLayoutState): void {
+        Client.resetWorldViewport();
+
+        if (Client.state === ClientMainState.MAP_BUILD || Client.state === ClientMainState.GAME || Client.state === ClientMainState.RECONNECT) {
+            Client.unloadFrame();
+            Client.loadFrame();
+            this.redrawSide = true;
+            this.redrawChat = true;
+            this.redrawIcons = true;
+            this.redrawChatMode = true;
+        } else if (Client.state === ClientMainState.FULLSCREEN) {
+            Client.drawAreaScanline = null;
+        }
+
+        GameShell.fullredraw = true;
+    }
+
+    private static resetWorldViewport(): void {
+        const distance: Int32Array = new Int32Array(9);
+        for (let x: number = 0; x < 9; x++) {
+            const angle: number = (x * 32 + 128 + 15) | 0;
+            const offset: number = (angle * CAMERA_DISTANCE_PITCH_SCALE + CAMERA_DISTANCE_BASE + CAMERA_ZOOM_MAX) | 0;
+            const sin: number = Pix3D.sinTable[angle];
+            distance[x] = (offset * sin) >> 16;
+        }
+        const gameRect = ClientLayout.current.game;
+        World.resetVisCalc(distance, CAMERA_VISIBILITY_FRUSTUM_START, CAMERA_VISIBILITY_FRUSTUM_END, gameRect.width, gameRect.height);
+    }
+
     private async mainLoad(): Promise<void> {
         if (this.loadingStep === 0) {
             // todo: move mapl/groundh
@@ -905,20 +974,14 @@ export class Client extends GameShell {
             for (let level: number = 0; level < BuildArea.LEVELS; level++) {
                 this.collision[level] = new CollisionMap();
             }
-            this.minimap = new Pix32(512, 512);
+            const minimapBufferSize = Math.max(LEGACY_MINIMAP_BUFFER_SIZE, BuildArea.SIZE * MINIMAP_TILE_SCALE + MINIMAP_BUFFER_MARGIN * 2);
+            this.minimap = new Pix32(minimapBufferSize, minimapBufferSize);
 
             TitleScreen.loadPos = 5;
             TitleScreen.loadString = 'Starting game engine...';
             this.loadingStep = 20;
         } else if (this.loadingStep === 20) {
-            const distance: Int32Array = new Int32Array(9);
-            for (let x: number = 0; x < 9; x++) {
-                const angle: number = (x * 32 + 128 + 15) | 0;
-                const offset: number = (angle * CAMERA_DISTANCE_PITCH_SCALE + CAMERA_DISTANCE_BASE + CAMERA_ZOOM_MAX) | 0;
-                const sin: number = Pix3D.sinTable[angle];
-                distance[x] = (offset * sin) >> 16;
-            }
-            World.resetVisCalc(distance, 500, 800, 512, 334);
+            Client.resetWorldViewport();
 
             TitleScreen.loadPos = 10;
             TitleScreen.loadString = 'Prepared visibility map';
@@ -1026,7 +1089,7 @@ export class Client extends GameShell {
             } else {
                 TitleScreen.loadPos = 50;
                 TitleScreen.loadString = 'Loaded title screen';
-                await TitleScreen.init(Client.binary, Client.sprites, this.sWid);
+                await TitleScreen.init(Client.binary, Client.sprites, ClientLayout.LEGACY_FRAME_WIDTH);
 
                 Client.setMainState(ClientMainState.TITLE_LOADING);
                 this.loadingStep = 70;
@@ -1340,17 +1403,19 @@ export class Client extends GameShell {
         Client.backbase2 = Client.requireFrameLoaded(PixLoader.makePix8FromJs5(Client.sprites, 'backbase2', ''), 'backbase2');
         Client.backhmid1 = Client.requireFrameLoaded(PixLoader.makePix8FromJs5(Client.sprites, 'backhmid1', ''), 'backhmid1');
 
-        Client.areaChat = new PixMap(479, 96);
+        const layout = ClientLayout.current;
+
+        Client.areaChat = new PixMap(layout.chat.width, layout.chat.height);
         Client.chatback.plotSprite(0, 0);
 
-        Client.areaMap = new PixMap(172, 156);
+        Client.areaMap = new PixMap(layout.map.width, layout.map.height);
         Pix2D.cls();
         Client.mapback.plotSprite(0, 0);
 
-        Client.areaSide = new PixMap(190, 261);
+        Client.areaSide = new PixMap(layout.side.width, layout.side.height);
         Client.invback.plotSprite(0, 0);
 
-        Client.areaGame = new PixMap(512, 334);
+        Client.areaGame = new PixMap(layout.game.width, layout.game.height);
         Pix2D.cls();
 
         Client.areaBackbase1 = new PixMap(496, 50);
@@ -1561,6 +1626,8 @@ export class Client extends GameShell {
             }
 
             const keyCount = ((this.psize - this.in.pos) / 16) | 0;
+            this.mapBuildRadiusZones = this.inferMapBuildRadiusZones(centreZoneX, centreZoneZ, keyCount);
+            this.mapBuildLocalCoordBits = this.mapBuildRadiusZones > BuildArea.BASE_ZONE_RADIUS * 2 ? 9 : 7;
             this.mapKeys = new Array(keyCount);
             for (let i: number = 0; i < keyCount; i++) {
                 const key = new Int32Array(4);
@@ -1583,8 +1650,12 @@ export class Client extends GameShell {
             }
             this.mapBuildLocationFile = new Array(keyCount).fill(0);
             let index: number = 0;
-            for (let x: number = ((centreZoneX - 6) / 8) | 0; x <= (((centreZoneX + 6) / 8) | 0); x++) {
-                for (let z: number = ((centreZoneZ - 6) / 8) | 0; z <= (((centreZoneZ + 6) / 8) | 0); z++) {
+            for (let x: number = Client.regionStart(centreZoneX, this.mapBuildRadiusZones); x <= Client.regionEnd(centreZoneX, this.mapBuildRadiusZones); x++) {
+                for (let z: number = Client.regionStart(centreZoneZ, this.mapBuildRadiusZones); z <= Client.regionEnd(centreZoneZ, this.mapBuildRadiusZones); z++) {
+                    if (index >= keyCount) {
+                        continue;
+                    }
+
                     const region: number = (x << 8) + z;
                     if (!skipTutorialIsland || z !== 49 && z !== 149 && z !== 147 && x !== 50 && (x !== 49 || z !== 47)) {
                         this.mapBuildIndex[index] = region;
@@ -1618,10 +1689,12 @@ export class Client extends GameShell {
             centreZoneZ = this.in.g2();
         }
 
+        this.mapBuildRadiusZones = BuildArea.BASE_ZONE_RADIUS;
+        this.mapBuildLocalCoordBits = 7;
         this.in.gBitStart();
         for (let levelIndex = 0; levelIndex < BuildArea.LEVELS; levelIndex++) {
-            for (let zoneX = 0; zoneX < 13; zoneX++) {
-                for (let zoneZ = 0; zoneZ < 13; zoneZ++) {
+            for (let zoneX = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
+                for (let zoneZ = 0; zoneZ < BuildArea.REGION_MODE_ZONES; zoneZ++) {
                     this.mapBuildRegionSrc[levelIndex][zoneX][zoneZ] = this.in.gBit(1) === 1 ? this.in.gBit(26) : -1;
                 }
             }
@@ -1645,8 +1718,8 @@ export class Client extends GameShell {
         this.mapBuildIndex = new Int32Array(keyCount);
         let index: number = 0;
         for (let levelIndex: number = 0; levelIndex < BuildArea.LEVELS; levelIndex++) {
-            for (let zoneX: number = 0; zoneX < 13; zoneX++) {
-                for (let zoneZ: number = 0; zoneZ < 13; zoneZ++) {
+            for (let zoneX: number = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
+                for (let zoneZ: number = 0; zoneZ < BuildArea.REGION_MODE_ZONES; zoneZ++) {
                     const src = this.mapBuildRegionSrc[levelIndex][zoneX][zoneZ];
                     if (src === -1) {
                         continue;
@@ -1662,6 +1735,10 @@ export class Client extends GameShell {
                         }
                     }
                     if (region !== -1) {
+                        if (index >= keyCount) {
+                            continue;
+                        }
+
                         this.mapBuildIndex[index] = region;
                         const z = region & 0xff;
                         const x = (region >> 8) & 0xff;
@@ -1674,6 +1751,43 @@ export class Client extends GameShell {
         }
 
         this.startRebuild(localZ, centreZoneZ, centreZoneX, localX, level);
+    }
+
+    private static regionStart(centreZone: number, radiusZones: number): number {
+        return ((centreZone - radiusZones) / 8) | 0;
+    }
+
+    private static regionEnd(centreZone: number, radiusZones: number): number {
+        return ((centreZone + radiusZones) / 8) | 0;
+    }
+
+    private static regionCount(centreZoneX: number, centreZoneZ: number, radiusZones: number): number {
+        const width = Client.regionEnd(centreZoneX, radiusZones) - Client.regionStart(centreZoneX, radiusZones) + 1;
+        const height = Client.regionEnd(centreZoneZ, radiusZones) - Client.regionStart(centreZoneZ, radiusZones) + 1;
+        return width * height;
+    }
+
+    private inferMapBuildRadiusZones(centreZoneX: number, centreZoneZ: number, keyCount: number): number {
+        let bestRadiusZones = BuildArea.BASE_ZONE_RADIUS;
+        let bestRegionCount = Client.regionCount(centreZoneX, centreZoneZ, bestRadiusZones);
+
+        for (let scale = 1; scale <= BuildArea.SCALE; scale++) {
+            const radiusZones = BuildArea.BASE_ZONE_RADIUS * scale;
+            const regionCount = Client.regionCount(centreZoneX, centreZoneZ, radiusZones);
+            if (regionCount === keyCount) {
+                return radiusZones;
+            }
+
+            if (regionCount <= keyCount && regionCount > bestRegionCount) {
+                bestRadiusZones = radiusZones;
+                bestRegionCount = regionCount;
+            }
+        }
+
+        if (bestRadiusZones !== BuildArea.RADIUS_ZONES) {
+            console.warn(`REBUILD_NORMAL key count ${keyCount} does not match configured buildAreaScale=${BuildArea.SCALE}; using ${bestRadiusZones / BuildArea.BASE_ZONE_RADIUS}x loaded-zone radius for this rebuild.`);
+        }
+        return bestRadiusZones;
     }
 
     private startRebuild(localZ: number, centreZoneZ: number, centreZoneX: number, localX: number, level: number): void {
@@ -1695,8 +1809,8 @@ export class Client extends GameShell {
 
         const prevBaseX = this.mapBuildBaseX;
         const prevBaseZ = this.mapBuildBaseZ;
-        this.mapBuildBaseX = (centreZoneX - 6) * 8;
-        this.mapBuildBaseZ = (centreZoneZ - 6) * 8;
+        this.mapBuildBaseX = (centreZoneX - this.mapBuildRadiusZones) * 8;
+        this.mapBuildBaseZ = (centreZoneZ - this.mapBuildRadiusZones) * 8;
         const dx = this.mapBuildBaseX - prevBaseX;
         const dz = this.mapBuildBaseZ - prevBaseZ;
 
@@ -3009,11 +3123,13 @@ export class Client extends GameShell {
         this.field1497 = -1;
         this.lastOverComId = -1;
 
-        if (ClientMouseListener.mouseX > 4 && ClientMouseListener.mouseY > 4 && ClientMouseListener.mouseX < 516 && ClientMouseListener.mouseY < 338) {
+        const layout = ClientLayout.current;
+
+        if (ClientLayout.containsGameScene(ClientMouseListener.mouseX, ClientMouseListener.mouseY)) {
             if (this.mainModalId === -1) {
                 this.addWorldOptions();
             } else {
-                this.addInterfaceOptions(this.mainModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, 4, 4, 0, 0);
+                this.addInterfaceOptions(this.mainModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, layout.game.x, layout.game.y, 0, ClientArea.Game);
             }
         }
 
@@ -3024,11 +3140,11 @@ export class Client extends GameShell {
         this.lastOverComId = -1;
 
 
-        if (ClientMouseListener.mouseX > 553 && ClientMouseListener.mouseY > 205 && ClientMouseListener.mouseX < 743 && ClientMouseListener.mouseY < 466) {
+        if (ClientLayout.contains(layout.side, ClientMouseListener.mouseX, ClientMouseListener.mouseY)) {
             if (this.sideModalId !== -1) {
-                this.addInterfaceOptions(this.sideModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, 553, 205, 0, 1);
+                this.addInterfaceOptions(this.sideModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, layout.side.x, layout.side.y, 0, ClientArea.Side);
             } else if (this.sideIcon[this.activeIcon] !== -1) {
-                this.addInterfaceOptions(this.sideIcon[this.activeIcon], ClientMouseListener.mouseX, ClientMouseListener.mouseY, 553, 205, 0, 1);
+                this.addInterfaceOptions(this.sideIcon[this.activeIcon], ClientMouseListener.mouseX, ClientMouseListener.mouseY, layout.side.x, layout.side.y, 0, ClientArea.Side);
             }
         }
 
@@ -3044,13 +3160,13 @@ export class Client extends GameShell {
         }
         this.field1497 = -1;
 
-        if (ClientMouseListener.mouseX > 17 && ClientMouseListener.mouseY > 357 && ClientMouseListener.mouseX < 496 && ClientMouseListener.mouseY < 453) {
+        if (ClientLayout.contains(layout.chat, ClientMouseListener.mouseX, ClientMouseListener.mouseY)) {
             if (this.chatModalId !== -1) {
-                this.addInterfaceOptions(this.chatModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, 17, 357, 0, 2);
+                this.addInterfaceOptions(this.chatModalId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, layout.chat.x, layout.chat.y, 0, ClientArea.Chat);
             } else if (this.tutComId !== -1) {
-                this.addInterfaceOptions(this.tutComId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, 17, 357, 0, 3);
-            } else if (ClientMouseListener.mouseY < 434 && ClientMouseListener.mouseX < 426) {
-                this.addChatOptions(ClientMouseListener.mouseX - 17, ClientMouseListener.mouseY - 357);
+                this.addInterfaceOptions(this.tutComId, ClientMouseListener.mouseX, ClientMouseListener.mouseY, layout.chat.x, layout.chat.y, 0, ClientArea.TutorialChat);
+            } else if (ClientMouseListener.mouseY < layout.chat.y + CHAT_HISTORY_HEIGHT && ClientMouseListener.mouseX < layout.chat.x + CHAT_OPTIONS_WIDTH) {
+                this.addChatOptions(ClientLayout.localX(layout.chat, ClientMouseListener.mouseX), ClientLayout.localY(layout.chat, ClientMouseListener.mouseY));
             }
         }
 
@@ -3122,8 +3238,10 @@ export class Client extends GameShell {
 
                 if ((type === 3 || type === 7) && (type === 7 || this.chatPrivateMode === 0 || (this.chatPrivateMode === 1 && this.isFriend(sender)))) {
                     const y: number = 329 - line * 13;
+                    const gameRect = ClientLayout.current.game;
+                    const mouseLocalY = ClientLayout.localY(gameRect, ClientMouseListener.mouseY);
 
-                    if (ClientMouseListener.mouseX > 4 && ClientMouseListener.mouseX < 516 && ClientMouseListener.mouseY - 4 > y - 10 && ClientMouseListener.mouseY - 4 <= y + 3) {
+                    if (ClientLayout.contains(gameRect, ClientMouseListener.mouseX, ClientMouseListener.mouseY) && mouseLocalY > y - 10 && mouseLocalY <= y + 3) {
                         if (this.staffmodlevel) {
                             this.menuOption[this.menuNumEntries] = 'Report abuse @whi@' + sender;
                             this.menuAction[this.menuNumEntries] = MiniMenuAction._PRIORITY + MiniMenuAction.ABUSE_REPORT;
@@ -3242,8 +3360,9 @@ export class Client extends GameShell {
             return;
         }
 
-        let x: number = ClientMouseListener.mouseClickX - 25 - 550;
-        let y: number = ClientMouseListener.mouseClickY - 4 - 4;
+        const mapRect = ClientLayout.current.map;
+        let x: number = ClientLayout.localX(mapRect, ClientMouseListener.mouseClickX) - 25;
+        let y: number = ClientLayout.localY(mapRect, ClientMouseListener.mouseClickY) - 4;
 
         if (x < 0 || y < 0 || x >= 146 || y >= 151) {
             return;
@@ -3287,62 +3406,29 @@ export class Client extends GameShell {
             return;
         }
 
-        if (ClientMouseListener.mouseClickX >= 539 && ClientMouseListener.mouseClickX <= 573 && ClientMouseListener.mouseClickY >= 169 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[0] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 0;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 569 && ClientMouseListener.mouseClickX <= 599 && ClientMouseListener.mouseClickY >= 168 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[1] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 1;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 597 && ClientMouseListener.mouseClickX <= 627 && ClientMouseListener.mouseClickY >= 168 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[2] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 2;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 625 && ClientMouseListener.mouseClickX <= 669 && ClientMouseListener.mouseClickY >= 168 && ClientMouseListener.mouseClickY < 203 && this.sideIcon[3] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 3;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 666 && ClientMouseListener.mouseClickX <= 696 && ClientMouseListener.mouseClickY >= 168 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[4] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 4;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 694 && ClientMouseListener.mouseClickX <= 724 && ClientMouseListener.mouseClickY >= 168 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[5] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 5;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 722 && ClientMouseListener.mouseClickX <= 756 && ClientMouseListener.mouseClickY >= 169 && ClientMouseListener.mouseClickY < 205 && this.sideIcon[6] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 6;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 540 && ClientMouseListener.mouseClickX <= 574 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 502 && this.sideIcon[7] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 7;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 572 && ClientMouseListener.mouseClickX <= 602 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 503 && this.sideIcon[8] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 8;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 599 && ClientMouseListener.mouseClickX <= 629 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 503 && this.sideIcon[9] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 9;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 627 && ClientMouseListener.mouseClickX <= 671 && ClientMouseListener.mouseClickY >= 467 && ClientMouseListener.mouseClickY < 502 && this.sideIcon[10] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 10;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 669 && ClientMouseListener.mouseClickX <= 699 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 503 && this.sideIcon[11] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 11;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 696 && ClientMouseListener.mouseClickX <= 726 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 503 && this.sideIcon[12] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 12;
-            this.redrawIcons = true;
-        } else if (ClientMouseListener.mouseClickX >= 724 && ClientMouseListener.mouseClickX <= 758 && ClientMouseListener.mouseClickY >= 466 && ClientMouseListener.mouseClickY < 502 && this.sideIcon[13] != -1) {
-            this.redrawSide = true;
-            this.activeIcon = 13;
-            this.redrawIcons = true;
+        const layout = ClientLayout.current;
+        const x = ClientMouseListener.mouseClickX;
+        const y = ClientMouseListener.mouseClickY;
+
+        for (let i = 0; i < SIDE_TOP_TAB_BOUNDS.length; i++) {
+            const bounds = SIDE_TOP_TAB_BOUNDS[i];
+            if (x >= layout.side.x + bounds.x1 && x <= layout.side.x + bounds.x2 && y >= layout.side.y + bounds.y1 && y < layout.side.y + bounds.y2 && this.sideIcon[i] !== -1) {
+                this.redrawSide = true;
+                this.activeIcon = i;
+                this.redrawIcons = true;
+                return;
+            }
+        }
+
+        for (let i = 0; i < SIDE_BOTTOM_TAB_BOUNDS.length; i++) {
+            const bounds = SIDE_BOTTOM_TAB_BOUNDS[i];
+            const icon = i + SIDE_TOP_TAB_BOUNDS.length;
+            if (x >= layout.side.x + bounds.x1 && x <= layout.side.x + bounds.x2 && y >= layout.frame.y + layout.frame.height + bounds.y1 && y < layout.frame.y + layout.frame.height + bounds.y2 && this.sideIcon[icon] !== -1) {
+                this.redrawSide = true;
+                this.activeIcon = icon;
+                this.redrawIcons = true;
+                return;
+            }
         }
     }
 
@@ -3352,7 +3438,13 @@ export class Client extends GameShell {
             return;
         }
 
-        if (ClientMouseListener.mouseClickX >= 6 && ClientMouseListener.mouseClickX <= 106 && ClientMouseListener.mouseClickY >= 467 && ClientMouseListener.mouseClickY <= 499) {
+        const frame = ClientLayout.current.frame;
+        const x = ClientMouseListener.mouseClickX;
+        const y = ClientMouseListener.mouseClickY;
+        const modeY1 = frame.height - 36;
+        const modeY2 = frame.height - 4;
+
+        if (x >= frame.x + CHAT_MODE_BUTTONS[0].x1 && x <= frame.x + CHAT_MODE_BUTTONS[0].x2 && y >= frame.y + modeY1 && y <= frame.y + modeY2) {
             this.chatPublicMode = (this.chatPublicMode + 1) % 4;
             this.redrawChatMode = true;
             this.redrawChat = true;
@@ -3361,7 +3453,7 @@ export class Client extends GameShell {
             this.out.p1(this.chatPublicMode);
             this.out.p1(this.chatPrivateMode);
             this.out.p1(this.chatTradeMode);
-        } else if (ClientMouseListener.mouseClickX >= 135 && ClientMouseListener.mouseClickX <= 235 && ClientMouseListener.mouseClickY >= 467 && ClientMouseListener.mouseClickY <= 499) {
+        } else if (x >= frame.x + CHAT_MODE_BUTTONS[1].x1 && x <= frame.x + CHAT_MODE_BUTTONS[1].x2 && y >= frame.y + modeY1 && y <= frame.y + modeY2) {
             this.chatPrivateMode = (this.chatPrivateMode + 1) % 3;
             this.redrawChatMode = true;
             this.redrawChat = true;
@@ -3370,7 +3462,7 @@ export class Client extends GameShell {
             this.out.p1(this.chatPublicMode);
             this.out.p1(this.chatPrivateMode);
             this.out.p1(this.chatTradeMode);
-        } else if (ClientMouseListener.mouseClickX >= 273 && ClientMouseListener.mouseClickX <= 373 && ClientMouseListener.mouseClickY >= 467 && ClientMouseListener.mouseClickY <= 499) {
+        } else if (x >= frame.x + CHAT_MODE_BUTTONS[2].x1 && x <= frame.x + CHAT_MODE_BUTTONS[2].x2 && y >= frame.y + modeY1 && y <= frame.y + modeY2) {
             this.chatTradeMode = (this.chatTradeMode + 1) % 3;
             this.redrawChatMode = true;
             this.redrawChat = true;
@@ -3379,7 +3471,7 @@ export class Client extends GameShell {
             this.out.p1(this.chatPublicMode);
             this.out.p1(this.chatPrivateMode);
             this.out.p1(this.chatTradeMode);
-        } else if (ClientMouseListener.mouseClickX >= 412 && ClientMouseListener.mouseClickX <= 512 && ClientMouseListener.mouseClickY >= 467 && ClientMouseListener.mouseClickY <= 499) {
+        } else if (x >= frame.x + CHAT_MODE_BUTTONS[3].x1 && x <= frame.x + CHAT_MODE_BUTTONS[3].x2 && y >= frame.y + modeY1 && y <= frame.y + modeY2) {
             this.closeModal();
 
             this.reportAbuseInput = '';
@@ -3740,7 +3832,7 @@ export class Client extends GameShell {
         let maxY: number = 0;
 
         if (this.groundh) {
-            if (orbitTileX > 3 && orbitTileZ > 3 && orbitTileX < 100 && orbitTileZ < 100) {
+            if (orbitTileX > 3 && orbitTileZ > 3 && orbitTileX < BuildArea.SIZE - 4 && orbitTileZ < BuildArea.SIZE - 4) {
                 for (let x: number = orbitTileX - 4; x <= orbitTileX + 4; x++) {
                     for (let z: number = orbitTileZ - 4; z <= orbitTileZ + 4; z++) {
                         let level: number = this.minusedlevel;
@@ -3953,7 +4045,7 @@ export class Client extends GameShell {
     }
 
     private moveEntity(e: ClientEntity): void {
-        if (e.x < 128 || e.z < 128 || e.x >= 13184 || e.z >= 13184) {
+        if (e.x < 128 || e.z < 128 || e.x >= (BuildArea.SIZE - 1) * 128 || e.z >= (BuildArea.SIZE - 1) * 128) {
             e.primaryAnim = -1;
             e.spotanimId = -1;
             e.exactMoveEnd = 0;
@@ -3963,7 +4055,8 @@ export class Client extends GameShell {
             e.abortRoute();
         }
 
-        if (e === this.localPlayer && (e.x < 1536 || e.z < 1536 || e.x >= 11776 || e.z >= 11776)) {
+        const localPlayerMargin = 12 * 128;
+        if (e === this.localPlayer && (e.x < localPlayerMargin || e.z < localPlayerMargin || e.x >= (BuildArea.SIZE - 12) * 128 || e.z >= (BuildArea.SIZE - 12) * 128)) {
             e.primaryAnim = -1;
             e.spotanimId = -1;
             e.exactMoveEnd = 0;
@@ -4377,7 +4470,8 @@ export class Client extends GameShell {
         }
 
         if (!GameShell.drawArea) {
-            GameShell.drawArea = new PixMap(765, 503);
+            const frame = ClientLayout.current.frame;
+            GameShell.drawArea = new PixMap(frame.width, frame.height);
         }
 
         this.animateInterface(this.fullModalId1, this.worldUpdateNum);
@@ -4389,9 +4483,10 @@ export class Client extends GameShell {
         GameShell.drawArea.setPixels();
         Client.drawAreaScanline = Pix3D.restoreClipping(Client.drawAreaScanline);
         Pix2D.cls();
-        this.drawInterface(this.fullModalId1, 503, 0, 765);
+        const frame = ClientLayout.current.frame;
+        this.drawInterface(this.fullModalId1, frame.height, ClientArea.Game, frame.width);
         if (this.fullModalId2 !== -1 && IfType.openInterface(this.fullModalId2)) {
-            this.drawInterface(this.fullModalId2, 503, 0, 765);
+            this.drawInterface(this.fullModalId2, frame.height, ClientArea.Game, frame.width);
         }
 
         if (this.isMenuOpen) {
@@ -4410,7 +4505,7 @@ export class Client extends GameShell {
         this.p12?.centreString('Connection lost', 256, 143, Colour.WHITE);
         this.p12?.centreString('Please wait - attempting to reestablish', 257, 159, Colour.BLACK);
         this.p12?.centreString('Please wait - attempting to reestablish', 256, 158, Colour.WHITE);
-        Client.areaGame?.draw(4, 4);
+        this.canvasDrawGame();
     }
 
     private gameDraw(): void {
@@ -4457,19 +4552,20 @@ export class Client extends GameShell {
         }
 
         if (this.chatModalId === -1) {
-            this.chatInterface.scrollPosY = this.chatScrollHeight - this.chatScrollPos - 77;
+            this.chatInterface.scrollPosY = this.chatScrollHeight - this.chatScrollPos - CHAT_HISTORY_HEIGHT;
+            const chatRect = ClientLayout.current.chat;
 
-            if (ClientMouseListener.mouseX > 448 && ClientMouseListener.mouseX < 560 && ClientMouseListener.mouseY > 332) {
-                this.doScrollbar(ClientMouseListener.mouseX - 17, ClientMouseListener.mouseY - 357, this.chatScrollHeight, 77, false, 463, 0, this.chatInterface);
+            if (ClientMouseListener.mouseX > chatRect.x + 431 && ClientMouseListener.mouseX < chatRect.x + 543 && ClientMouseListener.mouseY > chatRect.y - 25) {
+                this.doScrollbar(ClientLayout.localX(chatRect, ClientMouseListener.mouseX), ClientLayout.localY(chatRect, ClientMouseListener.mouseY), this.chatScrollHeight, CHAT_HISTORY_HEIGHT, false, CHAT_SCROLLBAR_X, 0, this.chatInterface);
             }
 
-            let offset: number = this.chatScrollHeight - this.chatInterface.scrollPosY - 77;
+            let offset: number = this.chatScrollHeight - this.chatInterface.scrollPosY - CHAT_HISTORY_HEIGHT;
             if (offset < 0) {
                 offset = 0;
             }
 
-            if (offset > this.chatScrollHeight - 77) {
-                offset = this.chatScrollHeight - 77;
+            if (offset > this.chatScrollHeight - CHAT_HISTORY_HEIGHT) {
+                offset = this.chatScrollHeight - CHAT_HISTORY_HEIGHT;
             }
 
             if (this.chatScrollPos !== offset) {
@@ -4528,6 +4624,8 @@ export class Client extends GameShell {
             this.canvasDrawChatMode(this.chatTradeMode, this.chatPrivateMode, this.chatPublicMode);
         }
 
+        this.canvasDrawFrameOverlays();
+
         if (this.localPlayer) {
             BgSound.jagFX = this.jagFX;
             BgSound.ambientVolume = this.ambientVolume;
@@ -4538,23 +4636,27 @@ export class Client extends GameShell {
     }
 
     private canvasDrawBack(): void {
-        Client.areaBackleft1?.draw(0, 4);
-        Client.areaBackleft2?.draw(0, 357);
-        Client.areaBackright1?.draw(722, 4);
-        Client.areaBackright2?.draw(743, 205);
+        const layout = ClientLayout.current;
+
+        Client.areaBackleft1?.draw(0, layout.game.y);
+        Client.areaBackleft2?.draw(0, layout.chat.y);
+        Client.areaBackright1?.draw(layout.map.x + layout.map.width, layout.map.y);
+        Client.areaBackright2?.draw(layout.side.x + layout.side.width, layout.side.y);
         Client.areaBacktop1?.draw(0, 0);
-        Client.areaBackvmid1?.draw(516, 4);
-        Client.areaBackvmid2?.draw(516, 205);
-        Client.areaBackvmid3?.draw(496, 357);
-        Client.areaBackhmid2?.draw(0, 338);
+        Client.areaBackvmid1?.draw(layout.map.x - 34, layout.map.y);
+        Client.areaBackvmid2?.draw(layout.side.x - 37, layout.side.y);
+        Client.areaBackvmid3?.draw(layout.chat.x + layout.chat.width, layout.chat.y);
+        Client.areaBackhmid2?.draw(0, layout.game.y + layout.game.height);
     }
 
     private canvasDrawGame(): void {
-        Client.areaGame?.draw(4, 4);
+        const rect = ClientLayout.current.game;
+        Client.areaGame?.draw(rect.x, rect.y);
     }
 
     private canvasDrawMap(): void {
-        Client.areaMap?.draw(550, 4);
+        const rect = ClientLayout.current.map;
+        Client.areaMap?.draw(rect.x, rect.y);
     }
 
     private static bindMap(): void {
@@ -4573,7 +4675,8 @@ export class Client extends GameShell {
     }
 
     private canvasDrawSide(): void {
-        Client.areaSide?.draw(553, 205);
+        const rect = ClientLayout.current.side;
+        Client.areaSide?.draw(rect.x, rect.y);
     }
 
     private static bindChat(): void {
@@ -4583,7 +4686,18 @@ export class Client extends GameShell {
     }
 
     private canvasDrawChat(): void {
-        Client.areaChat?.draw(17, 357);
+        const rect = ClientLayout.current.chat;
+        Client.areaChat?.draw(rect.x, rect.y);
+    }
+
+    private canvasDrawFrameOverlays(): void {
+        const layout = ClientLayout.current;
+        this.canvasDrawMap();
+        this.canvasDrawSide();
+        this.canvasDrawChat();
+        Client.areaBackhmid1?.draw(layout.side.x - 37, layout.side.y - 45);
+        Client.areaBackbase2?.draw(layout.side.x - 57, layout.frame.height - 37);
+        Client.areaBackbase1?.draw(0, layout.frame.height - 50);
     }
 
     private canvasDrawIcons(activeIcon: number, sideIcon: number[], redrawTabs: boolean, flashingIcon: number): void {
@@ -4632,7 +4746,8 @@ export class Client extends GameShell {
             }
         }
 
-        Client.areaBackhmid1?.draw(516, 160);
+        const layout = ClientLayout.current;
+        Client.areaBackhmid1?.draw(layout.side.x - 37, layout.side.y - 45);
 
         Client.areaBackbase2?.setPixels();
         Client.backbase2?.plotSprite(0, 0);
@@ -4676,7 +4791,7 @@ export class Client extends GameShell {
             }
         }
 
-        Client.areaBackbase2?.draw(496, 466);
+        Client.areaBackbase2?.draw(layout.side.x - 57, layout.frame.height - 37);
         Client.bindGame();
     }
 
@@ -4722,7 +4837,7 @@ export class Client extends GameShell {
 
         this.p12?.centreStringTag('Report abuse', 458, 33, Colour.WHITE, true);
 
-        Client.areaBackbase1?.draw(0, 453);
+        Client.areaBackbase1?.draw(0, ClientLayout.current.frame.height - 50);
         Client.bindGame();
     }
 
@@ -4796,8 +4911,9 @@ export class Client extends GameShell {
 
         Model.mouseCheck = true;
         Model.pickedCount = 0;
-        Model.mouseX = ClientMouseListener.mouseX - 4;
-        Model.mouseY = ClientMouseListener.mouseY - 4;
+        const gameRect = ClientLayout.current.game;
+        Model.mouseX = ClientLayout.localX(gameRect, ClientMouseListener.mouseX);
+        Model.mouseY = ClientLayout.localY(gameRect, ClientMouseListener.mouseY);
 
         Pix2D.cls();
         this.world?.renderAll(this.camX, this.camY, this.camZ, this.camPitch, this.camYaw, level);
@@ -5329,7 +5445,7 @@ export class Client extends GameShell {
                 } else if (this.chatEffect[i] === 4) {
                     const w: number = this.b12?.stringWid(message) ?? 0;
                     const offsetX: number = (((150 - this.chatTimer[i]) * (w + 100)) / 150) | 0;
-                    Pix2D.setClipping(this.projectX - 50, 0, this.projectX + 50, 334);
+                    Pix2D.setClipping(this.projectX - 50, 0, this.projectX + 50, ClientLayout.current.game.height);
                     this.b12?.drawString(message, this.projectX + 50 - offsetX, this.projectY + 1, Colour.BLACK);
                     this.b12?.drawString(message, this.projectX + 50 - offsetX, this.projectY, colour);
                     Pix2D.resetClipping();
@@ -5341,7 +5457,7 @@ export class Client extends GameShell {
                     } else if (delta > 125) {
                         offsetY = delta - 125;
                     }
-                    Pix2D.setClipping(0, this.projectY - this.chatHeight[i] - 1, 512, this.projectY + 5);
+                    Pix2D.setClipping(0, this.projectY - this.chatHeight[i] - 1, ClientLayout.current.game.width, this.projectY + 5);
                     this.b12?.centreString(message, this.projectX, this.projectY + offsetY + 1, Colour.BLACK);
                     this.b12?.centreString(message, this.projectX, this.projectY + offsetY, colour);
                     Pix2D.resetClipping();
@@ -5364,22 +5480,23 @@ export class Client extends GameShell {
 
     private otherOverlays(): void {
         this.drawPrivateMessages();
+        const gameRect = ClientLayout.current.game;
 
         if (this.crossMode === 1) {
-            this.cross[(this.crossCycle / 100) | 0]?.plotSprite(this.crossX - 8 - 4, this.crossY - 8 - 4);
+            this.cross[(this.crossCycle / 100) | 0]?.plotSprite(ClientLayout.localX(gameRect, this.crossX) - 8, ClientLayout.localY(gameRect, this.crossY) - 8);
         } else if (this.crossMode === 2) {
-            this.cross[((this.crossCycle / 100) | 0) + 4]?.plotSprite(this.crossX - 8 - 4, this.crossY - 8 - 4);
+            this.cross[((this.crossCycle / 100) | 0) + 4]?.plotSprite(ClientLayout.localX(gameRect, this.crossX) - 8, ClientLayout.localY(gameRect, this.crossY) - 8);
 
         }
 
         if (this.mainOverlayId !== -1) {
             this.animateInterface(this.mainOverlayId, this.worldUpdateNum);
-            this.drawInterface(this.mainOverlayId, 334, 4, 512);
+            this.drawInterface(this.mainOverlayId, gameRect.height, 4, gameRect.width);
         }
 
         if (this.mainModalId !== -1) {
             this.animateInterface(this.mainModalId, this.worldUpdateNum);
-            this.drawInterface(this.mainModalId, 334, 0, 512);
+            this.drawInterface(this.mainModalId, gameRect.height, ClientArea.Game, gameRect.width);
         }
 
         this.getSpecialArea();
@@ -5549,7 +5666,7 @@ export class Client extends GameShell {
     }
 
     private getOverlayPos(x: number, z: number, height: number): void {
-        if (x < 128 || z < 128 || x > 13056 || z > 13056) {
+        if (x < 128 || z < 128 || x > (BuildArea.SIZE - 2) * 128 || z > (BuildArea.SIZE - 2) * 128) {
             this.projectX = -1;
             this.projectY = -1;
             return;
@@ -5591,7 +5708,7 @@ export class Client extends GameShell {
         const tileX: number = sceneX >> 7;
         const tileZ: number = sceneZ >> 7;
 
-        if (tileX < 0 || tileZ < 0 || tileX > 103 || tileZ > 103) {
+        if (tileX < 0 || tileZ < 0 || tileX >= BuildArea.SIZE || tileZ >= BuildArea.SIZE) {
             return 0;
         }
 
@@ -5768,7 +5885,7 @@ export class Client extends GameShell {
                     const data: Uint8Array | null = this.mapBuildGroundData[i];
 
                     if (data) {
-                        build.loadGround(data, (this.mapBuildCentreZoneX - 6) * 8, (this.mapBuildCentreZoneZ - 6) * 8, x, z, this.collision);
+                        build.loadGround(data, this.mapBuildBaseX, this.mapBuildBaseZ, x, z, this.collision);
                     }
                 }
 
@@ -5799,8 +5916,8 @@ export class Client extends GameShell {
 
             if (this.regionMode && this.mapBuildIndex && this.mapBuildGroundData) {
                 for (let level = 0; level < BuildArea.LEVELS; level++) {
-                    for (let zoneX = 0; zoneX < 13; zoneX++) {
-                        for (let zoneZ = 0; zoneZ < 13; zoneZ++) {
+                    for (let zoneX = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
+                        for (let zoneZ = 0; zoneZ < BuildArea.REGION_MODE_ZONES; zoneZ++) {
                             const src = this.mapBuildRegionSrc[level][zoneX][zoneZ];
                             let loaded = false;
                             if (src !== -1) {
@@ -5825,8 +5942,8 @@ export class Client extends GameShell {
                     }
                 }
 
-                for (let zoneX = 0; zoneX < 13; zoneX++) {
-                    for (let zoneZ = 0; zoneZ < 13; zoneZ++) {
+                for (let zoneX = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
+                    for (let zoneZ = 0; zoneZ < BuildArea.REGION_MODE_ZONES; zoneZ++) {
                         if (this.mapBuildRegionSrc[0][zoneX][zoneZ] === -1) {
                             build.fadeAdjacent(zoneZ * 8, zoneX * 8, 8, 8);
                         }
@@ -5836,8 +5953,8 @@ export class Client extends GameShell {
                 this.preventTimeout(true);
 
                 for (let level = 0; level < BuildArea.LEVELS; level++) {
-                    for (let zoneX = 0; zoneX < 13; zoneX++) {
-                        for (let zoneZ = 0; zoneZ < 13; zoneZ++) {
+                    for (let zoneX = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
+                        for (let zoneZ = 0; zoneZ < BuildArea.REGION_MODE_ZONES; zoneZ++) {
                             const src = this.mapBuildRegionSrc[level][zoneX][zoneZ];
                             if (src === -1) {
                                 continue;
@@ -5896,10 +6013,10 @@ export class Client extends GameShell {
                 throw new Error();
             }
 
-            const left = ((this.mapBuildCentreZoneX - 6) / 8) | 0;
-            const right = ((this.mapBuildCentreZoneX + 6) / 8) | 0;
-            const bottom = ((this.mapBuildCentreZoneZ - 6) / 8) | 0;
-            const top = ((this.mapBuildCentreZoneZ + 6) / 8) | 0;
+            const left = Client.regionStart(this.mapBuildCentreZoneX, this.mapBuildRadiusZones);
+            const right = Client.regionEnd(this.mapBuildCentreZoneX, this.mapBuildRadiusZones);
+            const bottom = Client.regionStart(this.mapBuildCentreZoneZ, this.mapBuildRadiusZones);
+            const top = Client.regionEnd(this.mapBuildCentreZoneZ, this.mapBuildRadiusZones);
 
             for (let x = left - 1; x <= right + 1; x++) {
                 for (let z = bottom - 1; z <= top + 1; z++) {
@@ -5928,19 +6045,21 @@ export class Client extends GameShell {
             pixels[i] = 0;
         }
 
+        const minimapStride = this.minimap.wi;
+        const minimapOrigin = MINIMAP_BUFFER_MARGIN * minimapStride + MINIMAP_BUFFER_MARGIN;
         for (let z: number = 1; z < BuildArea.SIZE - 1; z++) {
-            let offset: number = (BuildArea.SIZE - 1 - z) * 512 * 4 + 24628;
+            let offset: number = (BuildArea.SIZE - 1 - z) * minimapStride * MINIMAP_TILE_SCALE + minimapOrigin + MINIMAP_TILE_SCALE;
 
             for (let x: number = 1; x < BuildArea.SIZE - 1; x++) {
                 if (this.mapl && (this.mapl[level][x][z] & (MapFlag.VisBelow | MapFlag.ForceHighDetail)) === 0) {
-                    this.world?.render2DGround(level, x, z, pixels, offset, 512);
+                    this.world?.render2DGround(level, x, z, pixels, offset, minimapStride);
                 }
 
                 if (level < 3 && this.mapl && (this.mapl[level + 1][x][z] & MapFlag.VisBelow) !== 0) {
-                    this.world?.render2DGround(level + 1, x, z, pixels, offset, 512);
+                    this.world?.render2DGround(level + 1, x, z, pixels, offset, minimapStride);
                 }
 
-                offset += 4;
+                offset += MINIMAP_TILE_SCALE;
             }
         }
 
@@ -6025,6 +6144,10 @@ export class Client extends GameShell {
         }
 
         const wallType: number = this.world.wallType(level, tileX, tileZ);
+        const minimapStride = this.minimap.wi;
+        const minimapOrigin = MINIMAP_BUFFER_MARGIN * minimapStride + MINIMAP_BUFFER_MARGIN;
+        const wallSouthOffset = minimapStride * 3;
+        const wallSouthEastOffset = wallSouthOffset + 3;
         if (wallType !== 0) {
             const info: number = this.world.typeCode2(level, tileX, tileZ, wallType);
             const angle: number = (info >> 6) & 0x3;
@@ -6035,24 +6158,24 @@ export class Client extends GameShell {
             }
 
             const dst: Int32Array = this.minimap.data;
-            const offset: number = tileX * 4 + (103 - tileZ) * 512 * 4 + 24624;
+            const offset: number = tileX * MINIMAP_TILE_SCALE + (BuildArea.SIZE - 1 - tileZ) * minimapStride * MINIMAP_TILE_SCALE + minimapOrigin;
             const locId: number = (wallType >> 14) & 0x7fff;
 
             const loc: LocType = LocType.list(locId);
             if (loc.mapscene !== -1) {
                 const scene: Pix8 | null = this.mapscene[loc.mapscene];
                 if (scene) {
-                    const offsetX: number = ((loc.width * 4 - scene.wi) / 2) | 0;
-                    const offsetY: number = ((loc.length * 4 - scene.hi) / 2) | 0;
-                    scene.plotSprite(tileX * 4 + 48 + offsetX, (BuildArea.SIZE - tileZ - loc.length) * 4 + offsetY + 48);
+                    const offsetX: number = ((loc.width * MINIMAP_TILE_SCALE - scene.wi) / 2) | 0;
+                    const offsetY: number = ((loc.length * MINIMAP_TILE_SCALE - scene.hi) / 2) | 0;
+                    scene.plotSprite(tileX * MINIMAP_TILE_SCALE + MINIMAP_BUFFER_MARGIN + offsetX, (BuildArea.SIZE - tileZ - loc.length) * MINIMAP_TILE_SCALE + offsetY + MINIMAP_BUFFER_MARGIN);
                 }
             } else {
                 if (shape === LocShape.WALL_STRAIGHT || shape === LocShape.WALL_L) {
                     if (angle === LocAngle.WEST) {
                         dst[offset] = rgb;
-                        dst[offset + 512] = rgb;
-                        dst[offset + 1024] = rgb;
-                        dst[offset + 1536] = rgb;
+                        dst[offset + minimapStride] = rgb;
+                        dst[offset + minimapStride * 2] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
                     } else if (angle === LocAngle.NORTH) {
                         dst[offset] = rgb;
                         dst[offset + 1] = rgb;
@@ -6060,14 +6183,14 @@ export class Client extends GameShell {
                         dst[offset + 3] = rgb;
                     } else if (angle === LocAngle.EAST) {
                         dst[offset + 3] = rgb;
-                        dst[offset + 3 + 512] = rgb;
-                        dst[offset + 3 + 1024] = rgb;
-                        dst[offset + 3 + 1536] = rgb;
+                        dst[offset + 3 + minimapStride] = rgb;
+                        dst[offset + 3 + minimapStride * 2] = rgb;
+                        dst[offset + 3 + wallSouthOffset] = rgb;
                     } else if (angle === LocAngle.SOUTH) {
-                        dst[offset + 1536] = rgb;
-                        dst[offset + 1536 + 1] = rgb;
-                        dst[offset + 1536 + 2] = rgb;
-                        dst[offset + 1536 + 3] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
+                        dst[offset + wallSouthOffset + 1] = rgb;
+                        dst[offset + wallSouthOffset + 2] = rgb;
+                        dst[offset + wallSouthOffset + 3] = rgb;
                     }
                 }
 
@@ -6077,18 +6200,18 @@ export class Client extends GameShell {
                     } else if (angle === LocAngle.NORTH) {
                         dst[offset + 3] = rgb;
                     } else if (angle === LocAngle.EAST) {
-                        dst[offset + 3 + 1536] = rgb;
+                        dst[offset + wallSouthEastOffset] = rgb;
                     } else if (angle === LocAngle.SOUTH) {
-                        dst[offset + 1536] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
                     }
                 }
 
                 if (shape === LocShape.WALL_L) {
                     if (angle === LocAngle.SOUTH) {
                         dst[offset] = rgb;
-                        dst[offset + 512] = rgb;
-                        dst[offset + 1024] = rgb;
-                        dst[offset + 1536] = rgb;
+                        dst[offset + minimapStride] = rgb;
+                        dst[offset + minimapStride * 2] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
                     } else if (angle === LocAngle.WEST) {
                         dst[offset] = rgb;
                         dst[offset + 1] = rgb;
@@ -6096,14 +6219,14 @@ export class Client extends GameShell {
                         dst[offset + 3] = rgb;
                     } else if (angle === LocAngle.NORTH) {
                         dst[offset + 3] = rgb;
-                        dst[offset + 3 + 512] = rgb;
-                        dst[offset + 3 + 1024] = rgb;
-                        dst[offset + 3 + 1536] = rgb;
+                        dst[offset + 3 + minimapStride] = rgb;
+                        dst[offset + 3 + minimapStride * 2] = rgb;
+                        dst[offset + 3 + wallSouthOffset] = rgb;
                     } else if (angle === LocAngle.EAST) {
-                        dst[offset + 1536] = rgb;
-                        dst[offset + 1536 + 1] = rgb;
-                        dst[offset + 1536 + 2] = rgb;
-                        dst[offset + 1536 + 3] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
+                        dst[offset + wallSouthOffset + 1] = rgb;
+                        dst[offset + wallSouthOffset + 2] = rgb;
+                        dst[offset + wallSouthOffset + 3] = rgb;
                     }
                 }
             }
@@ -6120,9 +6243,9 @@ export class Client extends GameShell {
             if (loc.mapscene !== -1) {
                 const scene: Pix8 | null = this.mapscene[loc.mapscene];
                 if (scene) {
-                    const offsetX: number = ((loc.width * 4 - scene.wi) / 2) | 0;
-                    const offsetY: number = ((loc.length * 4 - scene.hi) / 2) | 0;
-                    scene.plotSprite(tileX * 4 + 48 + offsetX, (BuildArea.SIZE - tileZ - loc.length) * 4 + offsetY + 48);
+                    const offsetX: number = ((loc.width * MINIMAP_TILE_SCALE - scene.wi) / 2) | 0;
+                    const offsetY: number = ((loc.length * MINIMAP_TILE_SCALE - scene.hi) / 2) | 0;
+                    scene.plotSprite(tileX * MINIMAP_TILE_SCALE + MINIMAP_BUFFER_MARGIN + offsetX, (BuildArea.SIZE - tileZ - loc.length) * MINIMAP_TILE_SCALE + offsetY + MINIMAP_BUFFER_MARGIN);
                 }
             } else {
                 if (shape === LocShape.WALL_DIAGONAL) {
@@ -6132,18 +6255,18 @@ export class Client extends GameShell {
                     }
 
                     const dst: Int32Array = this.minimap.data;
-                    const offset: number = tileX * 4 + (BuildArea.SIZE - 1 - tileZ) * 512 * 4 + 24624;
+                    const offset: number = tileX * MINIMAP_TILE_SCALE + (BuildArea.SIZE - 1 - tileZ) * minimapStride * MINIMAP_TILE_SCALE + minimapOrigin;
 
                     if (angle === LocAngle.WEST || angle === LocAngle.EAST) {
-                        dst[offset + 1536] = rgb;
-                        dst[offset + 1024 + 1] = rgb;
-                        dst[offset + 512 + 2] = rgb;
+                        dst[offset + wallSouthOffset] = rgb;
+                        dst[offset + minimapStride * 2 + 1] = rgb;
+                        dst[offset + minimapStride + 2] = rgb;
                         dst[offset + 3] = rgb;
                     } else {
                         dst[offset] = rgb;
-                        dst[offset + 512 + 1] = rgb;
-                        dst[offset + 1024 + 2] = rgb;
-                        dst[offset + 1536 + 3] = rgb;
+                        dst[offset + minimapStride + 1] = rgb;
+                        dst[offset + minimapStride * 2 + 2] = rgb;
+                        dst[offset + wallSouthEastOffset] = rgb;
                     }
                 }
             }
@@ -6157,9 +6280,9 @@ export class Client extends GameShell {
             if (loc.mapscene !== -1) {
                 const scene: Pix8 | null = this.mapscene[loc.mapscene];
                 if (scene) {
-                    const offsetX: number = ((loc.width * 4 - scene.wi) / 2) | 0;
-                    const offsetY: number = ((loc.length * 4 - scene.hi) / 2) | 0;
-                    scene.plotSprite(tileX * 4 + 48 + offsetX, (BuildArea.SIZE - tileZ - loc.length) * 4 + offsetY + 48);
+                    const offsetX: number = ((loc.width * MINIMAP_TILE_SCALE - scene.wi) / 2) | 0;
+                    const offsetY: number = ((loc.length * MINIMAP_TILE_SCALE - scene.hi) / 2) | 0;
+                    scene.plotSprite(tileX * MINIMAP_TILE_SCALE + MINIMAP_BUFFER_MARGIN + offsetX, (BuildArea.SIZE - tileZ - loc.length) * MINIMAP_TILE_SCALE + offsetY + MINIMAP_BUFFER_MARGIN);
                 }
             }
         }
@@ -8140,7 +8263,7 @@ export class Client extends GameShell {
             const layer: number = LOC_SHAPE_TO_LAYER[shape];
             const seq: number = buf.g2_alt3();
 
-            if (x >= 0 && z >= 0 && x < 103 && z < 103 && this.world && this.groundh) {
+            if (x >= 0 && z >= 0 && x < BuildArea.SIZE - 1 && z < BuildArea.SIZE - 1 && this.world && this.groundh) {
                 const heightSW = this.groundh[this.minusedlevel][x][z];
                 const heightSE = this.groundh[this.minusedlevel][x + 1][z];
                 const heightNE = this.groundh[this.minusedlevel][x + 1][z + 1];
@@ -8506,7 +8629,7 @@ export class Client extends GameShell {
                     loc.startTime--;
                 }
 
-                if (loc.startTime === 0 && loc.x >= 1 && loc.z >= 1 && loc.x <= 102 && loc.z <= 102 && (loc.newType < 0 || ClientBuild.changeLocAvailable(loc.newType, loc.newShape))) {
+                if (loc.startTime === 0 && loc.x >= 1 && loc.z >= 1 && loc.x < BuildArea.SIZE - 1 && loc.z < BuildArea.SIZE - 1 && (loc.newType < 0 || ClientBuild.changeLocAvailable(loc.newType, loc.newShape))) {
                     this.locChangeUnchecked(loc.level, loc.layer, loc.x, loc.z, loc.newType, loc.newShape, loc.newAngle);
                     loc.startTime = -1;
 
@@ -8524,7 +8647,7 @@ export class Client extends GameShell {
     }
 
     private locChangeUnchecked(level: number, layer: number, x: number, z: number, id: number, shape: number, angle: number): void {
-        if (x < 1 || z < 1 || x > 102 || z > 102) {
+        if (x < 1 || z < 1 || x >= BuildArea.SIZE - 1 || z >= BuildArea.SIZE - 1) {
             return;
         }
 
@@ -8710,8 +8833,8 @@ export class Client extends GameShell {
                 if (extendedInfo === 1) {
                     this.entityUpdateIds[this.entityUpdateCount++] = LOCAL_PLAYER_INDEX;
                 }
-                const localX: number = this.in.gBit(7);
-                const localZ: number = this.in.gBit(7);
+                const localX: number = this.in.gBit(this.mapBuildLocalCoordBits);
+                const localZ: number = this.in.gBit(this.mapBuildLocalCoordBits);
 
                 this.localPlayer?.teleport(localZ, jump === 1, localX);
             }
@@ -9324,7 +9447,8 @@ export class Client extends GameShell {
         }
 
         let button: number = ClientMouseListener.mouseClickButton;
-        if (this.targetMode === 1 && ClientMouseListener.mouseClickX >= 516 && ClientMouseListener.mouseClickY >= 160 && ClientMouseListener.mouseClickX <= 765 && ClientMouseListener.mouseClickY <= 205) {
+        const layout = ClientLayout.current;
+        if (this.targetMode === 1 && ClientMouseListener.mouseClickX >= layout.side.x - 37 && ClientMouseListener.mouseClickY >= layout.side.y - 45 && ClientMouseListener.mouseClickX <= layout.frame.x + layout.frame.width && ClientMouseListener.mouseClickY <= layout.side.y) {
             button = 0;
         }
 
@@ -9338,14 +9462,14 @@ export class Client extends GameShell {
                 let clickY: number = ClientMouseListener.mouseClickY;
 
                 if (this.menuArea === 0) {
-                    clickX -= 4;
-                    clickY -= 4;
+                    clickX -= layout.game.x;
+                    clickY -= layout.game.y;
                 } else if (this.menuArea === 1) {
-                    clickX -= 553;
-                    clickY -= 205;
+                    clickX -= layout.side.x;
+                    clickY -= layout.side.y;
                 } else if (this.menuArea === 2) {
-                    clickX -= 17;
-                    clickY -= 357;
+                    clickX -= layout.chat.x;
+                    clickY -= layout.chat.y;
                 }
 
                 let option: number = -1;
@@ -9372,14 +9496,14 @@ export class Client extends GameShell {
                 let y: number = ClientMouseListener.mouseY;
 
                 if (this.menuArea === 0) {
-                    x -= 4;
-                    y -= 4;
+                    x -= layout.game.x;
+                    y -= layout.game.y;
                 } else if (this.menuArea === 1) {
-                    x -= 553;
-                    y -= 205;
+                    x -= layout.side.x;
+                    y -= layout.side.y;
                 } else if (this.menuArea === 2) {
-                    x -= 17;
-                    y -= 357;
+                    x -= layout.chat.x;
+                    y -= layout.chat.y;
                 }
 
                 if (x < this.menuX - 10 || x > this.menuX + this.menuWidth + 10 || y < this.menuY - 10 || y > this.menuY + this.menuHeight + 10) {
@@ -9456,15 +9580,10 @@ export class Client extends GameShell {
 
         let mouseX: number = ClientMouseListener.mouseX;
         let mouseY: number = ClientMouseListener.mouseY;
-        if (this.menuArea === 0) {
-            mouseX -= 4;
-            mouseY -= 4;
-        } else if (this.menuArea === 1) {
-            mouseX -= 553;
-            mouseY -= 205;
-        } else if (this.menuArea === 2) {
-            mouseX -= 17;
-            mouseY -= 357;
+        if (this.menuArea === ClientArea.Game || this.menuArea === ClientArea.Side || this.menuArea === ClientArea.Chat) {
+            const rect = ClientLayout.rectForArea(this.menuArea);
+            mouseX = ClientLayout.localX(rect, mouseX);
+            mouseY = ClientLayout.localY(rect, mouseY);
         }
 
         for (let i: number = 0; i < this.menuNumEntries; i++) {
@@ -9500,6 +9619,34 @@ export class Client extends GameShell {
         this.b12?.drawStringAntiMacro(tooltip, 4, 15, Colour.WHITE, true, (this.loopCycle / 1000) | 0);
     }
 
+    private openMenuInArea(area: ClientArea, width: number, height: number): void {
+        const rect = ClientLayout.rectForArea(area);
+        if (!ClientLayout.contains(rect, ClientMouseListener.mouseClickX, ClientMouseListener.mouseClickY)) {
+            return;
+        }
+
+        let x: number = ClientLayout.localX(rect, ClientMouseListener.mouseClickX) - ((width / 2) | 0);
+        if (x < 0) {
+            x = 0;
+        } else if (x + width > rect.width) {
+            x = rect.width - width;
+        }
+
+        let y: number = ClientLayout.localY(rect, ClientMouseListener.mouseClickY);
+        if (y < 0) {
+            y = 0;
+        } else if (y + height > rect.height) {
+            y = rect.height - height;
+        }
+
+        this.isMenuOpen = true;
+        this.menuArea = area;
+        this.menuX = x;
+        this.menuY = y;
+        this.menuWidth = width;
+        this.menuHeight = this.menuNumEntries * 15 + 22;
+    }
+
     private openMenu(): void {
         let width: number = 0;
         if (this.b12) {
@@ -9516,81 +9663,9 @@ export class Client extends GameShell {
 
         const height: number = this.menuNumEntries * 15 + 21;
 
-        let x: number;
-        let y: number;
-
-        if (ClientMouseListener.mouseClickX > 4 && ClientMouseListener.mouseClickY > 4 && ClientMouseListener.mouseClickX < 516 && ClientMouseListener.mouseClickY < 338) {
-            x = ClientMouseListener.mouseClickX - ((width / 2) | 0) - 4;
-            if (x + width > 512) {
-                x = 512 - width;
-            }
-            if (x < 0) {
-                x = 0;
-            }
-
-            y = ClientMouseListener.mouseClickY - 4;
-            if (y + height > 334) {
-                y = 334 - height;
-            }
-            if (y < 0) {
-                y = 0;
-            }
-
-            this.isMenuOpen = true;
-            this.menuArea = 0;
-            this.menuX = x;
-            this.menuY = y;
-            this.menuWidth = width;
-            this.menuHeight = this.menuNumEntries * 15 + 22;
-        }
-
-        // the sidebar/tabs area
-        if (ClientMouseListener.mouseClickX > 553 && ClientMouseListener.mouseClickY > 205 && ClientMouseListener.mouseClickX < 743 && ClientMouseListener.mouseClickY < 466) {
-            x = ClientMouseListener.mouseClickX - ((width / 2) | 0) - 553;
-            if (x < 0) {
-                x = 0;
-            } else if (x + width > 190) {
-                x = 190 - width;
-            }
-
-            y = ClientMouseListener.mouseClickY - 205;
-            if (y < 0) {
-                y = 0;
-            } else if (y + height > 261) {
-                y = 261 - height;
-            }
-
-            this.isMenuOpen = true;
-            this.menuArea = 1;
-            this.menuX = x;
-            this.menuY = y;
-            this.menuWidth = width;
-            this.menuHeight = this.menuNumEntries * 15 + 22;
-        }
-
-        // the chatbox area
-        if (ClientMouseListener.mouseClickX > 17 && ClientMouseListener.mouseClickY > 357 && ClientMouseListener.mouseClickX < 496 && ClientMouseListener.mouseClickY < 453) {
-            x = ClientMouseListener.mouseClickX - ((width / 2) | 0) - 17;
-            if (x < 0) {
-                x = 0;
-            } else if (x + width > 479) {
-                x = 479 - width;
-            }
-
-            y = ClientMouseListener.mouseClickY - 357;
-            if (y < 0) {
-                y = 0;
-            } else if (y + height > 96) {
-                y = 96 - height;
-            }
-
-            this.isMenuOpen = true;
-            this.menuArea = 2;
-            this.menuX = x;
-            this.menuY = y;
-            this.menuWidth = width;
-            this.menuHeight = this.menuNumEntries * 15 + 22;
-        }
+        this.openMenuInArea(ClientArea.Game, width, height);
+        this.openMenuInArea(ClientArea.Side, width, height);
+        this.openMenuInArea(ClientArea.Chat, width, height);
     }
 
     private isAddFriendOption(option: number): boolean {
@@ -10459,10 +10534,11 @@ export class Client extends GameShell {
         }
 
         if (action === MiniMenuAction.WALK) {
+            const gameRect = ClientLayout.current.game;
             if (this.isMenuOpen) {
-                this.world?.updateMousePicking(b - 4, c - 4);
+                this.world?.updateMousePicking(ClientLayout.localX(gameRect, b), ClientLayout.localY(gameRect, c));
             } else {
-                this.world?.updateMousePicking(ClientMouseListener.mouseClickX - 4, ClientMouseListener.mouseClickY - 4);
+                this.world?.updateMousePicking(ClientLayout.localX(gameRect, ClientMouseListener.mouseClickX), ClientLayout.localY(gameRect, ClientMouseListener.mouseClickY));
             }
         }
 
@@ -12595,13 +12671,14 @@ export class Client extends GameShell {
 
     private drawSide(): void {
         Client.bindSide();
+        const sideRect = ClientLayout.current.side;
 
         if (this.sideModalId !== -1) {
-            if (!this.drawInterface(this.sideModalId, 261, 1, 190)) {
+            if (!this.drawInterface(this.sideModalId, sideRect.height, ClientArea.Side, sideRect.width)) {
                 this.redrawSide = true;
             }
         } else if (this.sideIcon[this.activeIcon] !== -1) {
-            if (!this.drawInterface(this.sideIcon[this.activeIcon], 261, 1, 190)) {
+            if (!this.drawInterface(this.sideIcon[this.activeIcon], sideRect.height, ClientArea.Side, sideRect.width)) {
                 this.redrawSide = true;
             }
         }
@@ -12616,6 +12693,7 @@ export class Client extends GameShell {
 
     private drawChat(): void {
         Client.bindChat();
+        const chatRect = ClientLayout.current.chat;
 
         if (this.socialInputOpen) {
             this.b12?.centreString(this.socialInputHeader, 239, 40, Colour.BLACK);
@@ -12627,18 +12705,18 @@ export class Client extends GameShell {
             this.b12?.centreString(this.tutComMessage, 239, 40, Colour.BLACK);
             this.b12?.centreString('Click to continue', 239, 60, Colour.DARKBLUE);
         } else if (this.chatModalId !== -1) {
-            if (!this.drawInterface(this.chatModalId, 96, 2, 479)) {
+            if (!this.drawInterface(this.chatModalId, chatRect.height, ClientArea.Chat, chatRect.width)) {
                 this.redrawChat = true;
             }
         } else if (this.tutComId !== -1) {
-            if (!this.drawInterface(this.tutComId, 96, 3, 479)) {
+            if (!this.drawInterface(this.tutComId, chatRect.height, ClientArea.TutorialChat, chatRect.width)) {
                 this.redrawChat = true;
             }
         } else {
             const font: PixFont | null = this.p12;
             let line: number = 0;
 
-            Pix2D.setClipping(0, 0, 463, 77);
+            Pix2D.setClipping(0, 0, CHAT_SCROLLBAR_X, CHAT_HISTORY_HEIGHT);
 
             for (let i: number = 0; i < 100; i++) {
                 const message: string | null = this.chatText[i];
@@ -12744,7 +12822,7 @@ export class Client extends GameShell {
                 this.chatScrollHeight = 78;
             }
 
-            this.drawScrollbar(463, 0, this.chatScrollHeight - this.chatScrollPos - 77, this.chatScrollHeight, 77);
+            this.drawScrollbar(CHAT_SCROLLBAR_X, 0, this.chatScrollHeight - this.chatScrollPos - CHAT_HISTORY_HEIGHT, this.chatScrollHeight, CHAT_HISTORY_HEIGHT);
 
             let username;
             if (this.localPlayer == null || this.localPlayer.name == null) {
@@ -12756,7 +12834,7 @@ export class Client extends GameShell {
             font?.drawString(username + ':', 4, 90, Colour.BLACK);
             font?.drawString(this.chatInput + '*', font.stringWid(username + ': ') + 6, 90, Colour.BLUE);
 
-            Pix2D.hline(0, 77, 479, Colour.BLACK);
+            Pix2D.hline(0, CHAT_HISTORY_HEIGHT, chatRect.width, Colour.BLACK);
         }
 
         if (this.isMenuOpen && this.menuArea === 2) {
@@ -12793,8 +12871,8 @@ export class Client extends GameShell {
         }
 
         const angle: number = (this.orbitCameraYaw + this.macroMinimapAngle) & 0x7ff;
-        let anchorX: number = ((this.localPlayer.x / 32) | 0) + 48;
-        let anchorY: number = 464 - ((this.localPlayer.z / 32) | 0);
+        let anchorX: number = ((this.localPlayer.x / 32) | 0) + MINIMAP_BUFFER_MARGIN;
+        let anchorY: number = ((this.minimap?.hi ?? LEGACY_MINIMAP_BUFFER_SIZE) - MINIMAP_BUFFER_MARGIN) - ((this.localPlayer.z / 32) | 0);
 
         this.minimap?.scanlineRotatePlotSprite(25, 5, 146, 151, anchorX, anchorY, angle, this.macroMinimapZoom + 256, Client.minimapMaskLineOffsets, Client.minimapMaskLineLengths);
         this.compass?.scanlineRotatePlotSprite(0, 0, 33, 33, 25, 25, this.orbitCameraYaw, 256, Client.compassMaskLineOffsets, Client.compassMaskLineLengths);
@@ -13385,43 +13463,33 @@ export class Client extends GameShell {
     }
 
     private insideGame() {
-        const x1: number = 4;
-        const y1: number = 4;
-        const x2: number = x1 + 512;
-        const y2: number = y1 + 334;
-        return this.ingame && ClientMouseListener.mouseX >= x1 && ClientMouseListener.mouseX <= x2 && ClientMouseListener.mouseY >= y1 && ClientMouseListener.mouseY <= y2;
+        return this.ingame && ClientLayout.containsGameScene(ClientMouseListener.mouseX, ClientMouseListener.mouseY);
     }
 
     private insideSide() {
-        const x1: number = 553;
-        const y1: number = 205;
-        const x2: number = x1 + 190;
-        const y2: number = y1 + 261;
-        return this.ingame && ClientMouseListener.mouseX >= x1 && ClientMouseListener.mouseX <= x2 && ClientMouseListener.mouseY >= y1 && ClientMouseListener.mouseY <= y2;
+        return this.ingame && ClientLayout.contains(ClientLayout.current.side, ClientMouseListener.mouseX, ClientMouseListener.mouseY);
     }
 
     private insideChat() {
-        const x1: number = 480;
-        const y1: number = 357;
+        const chatRect = ClientLayout.current.chat;
+        const x1: number = chatRect.x + CHAT_SCROLLBAR_X;
+        const y1: number = chatRect.y;
         const x2: number = x1 + 16;
-        const y2: number = y1 + 77;
+        const y2: number = y1 + CHAT_HISTORY_HEIGHT;
         return this.ingame && !this.dialogInputOpen && !this.socialInputOpen && ClientMouseListener.mouseX >= x1 && ClientMouseListener.mouseX <= x2 && ClientMouseListener.mouseY >= y1 && ClientMouseListener.mouseY <= y2;
     }
 
     private insideChatInput() {
-        const x1: number = 17;
-        const y1: number = 434;
-        const x2: number = x1 + 479;
+        const chatRect = ClientLayout.current.chat;
+        const x1: number = chatRect.x;
+        const y1: number = chatRect.y + CHAT_HISTORY_HEIGHT;
+        const x2: number = x1 + chatRect.width;
         const y2: number = y1 + 26;
         return this.ingame && this.chatModalId === -1 && !this.dialogInputOpen && !this.socialInputOpen && ClientMouseListener.mouseX >= x1 && ClientMouseListener.mouseX <= x2 && ClientMouseListener.mouseY >= y1 && ClientMouseListener.mouseY <= y2;
     }
 
     protected insideChatPopup() {
-        const x1: number = 17;
-        const y1: number = 357;
-        const x2: number = x1 + 479;
-        const y2: number = y1 + 96;
-        return this.ingame && (this.dialogInputOpen || this.socialInputOpen) && ClientMouseListener.mouseX >= x1 && ClientMouseListener.mouseX <= x2 && ClientMouseListener.mouseY >= y1 && ClientMouseListener.mouseY <= y2;
+        return this.ingame && (this.dialogInputOpen || this.socialInputOpen) && ClientLayout.contains(ClientLayout.current.chat, ClientMouseListener.mouseX, ClientMouseListener.mouseY);
     }
 
     private insideReportAbuse() {

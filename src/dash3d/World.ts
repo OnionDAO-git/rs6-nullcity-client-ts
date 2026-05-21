@@ -81,11 +81,12 @@ const TEXTURE_AVERAGE = Uint16Array.of(
 );
 
 const OCCLUDER_LEVELS = 4;
-const VIEW_DISTANCE_TILES = 32;
+const VIEW_DISTANCE_TILES = 128;
 const VIEW_DISTANCE_TILE_SPAN = VIEW_DISTANCE_TILES * 2;
 const VIS_BACKING_SIZE = VIEW_DISTANCE_TILE_SPAN + 1;
 const VIS_CALC_SIZE = VIS_BACKING_SIZE + 2;
-const FAR_CLIP = 5000;
+const FAR_CLIP = 20000;
+const NEAR_CLIP = 50;
 
 export default class World {
     static lowMem: boolean = true;
@@ -911,7 +912,7 @@ export default class World {
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel][(yawLevel + 1) % 31][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                                if (visBacking[pitchLevel][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
@@ -921,7 +922,7 @@ export default class World {
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 31][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
                                     visible = true;
                                     break check_areas;
                                 }
@@ -941,7 +942,7 @@ export default class World {
         const pz: number = (y * this.cameraSinX + tmp * this.cameraCosX) >> 16;
         const py: number = (y * this.cameraCosX - tmp * this.cameraSinX) >> 16;
 
-        if (pz < 50 || pz > FAR_CLIP) {
+        if (pz < NEAR_CLIP || pz > FAR_CLIP) {
             return false;
         }
 
@@ -1946,10 +1947,6 @@ export default class World {
         z0 = (y0 * sinEyePitch + z0 * cosEyePitch) >> 16;
         y0 = tmp;
 
-        if (z0 < 50) {
-            return;
-        }
-
         tmp = (z1 * sinEyeYaw + x1 * cosEyeYaw) >> 16;
         z1 = (z1 * cosEyeYaw - x1 * sinEyeYaw) >> 16;
         x1 = tmp;
@@ -1957,10 +1954,6 @@ export default class World {
         tmp = (y1 * cosEyePitch - z1 * sinEyePitch) >> 16;
         z1 = (y1 * sinEyePitch + z1 * cosEyePitch) >> 16;
         y1 = tmp;
-
-        if (z1 < 50) {
-            return;
-        }
 
         tmp = (z2 * sinEyeYaw + x2 * cosEyeYaw) >> 16;
         z2 = (z2 * cosEyeYaw - x2 * sinEyeYaw) >> 16;
@@ -1970,10 +1963,6 @@ export default class World {
         z2 = (y2 * sinEyePitch + z2 * cosEyePitch) >> 16;
         y2 = tmp;
 
-        if (z2 < 50) {
-            return;
-        }
-
         tmp = (z3 * sinEyeYaw + x3 * cosEyeYaw) >> 16;
         z3 = (z3 * cosEyeYaw - x3 * sinEyeYaw) >> 16;
         x3 = tmp;
@@ -1982,9 +1971,14 @@ export default class World {
         z3 = (y3 * sinEyePitch + z3 * cosEyePitch) >> 16;
         y3 = tmp;
 
-        if (z3 < 50) {
+        if (z0 < NEAR_CLIP && z1 < NEAR_CLIP && z2 < NEAR_CLIP && z3 < NEAR_CLIP) {
             return;
         }
+
+        z0 = Math.max(z0, NEAR_CLIP);
+        z1 = Math.max(z1, NEAR_CLIP);
+        z2 = Math.max(z2, NEAR_CLIP);
+        z3 = Math.max(z3, NEAR_CLIP);
 
         const px0: number = Pix3D.originX + (((x0 << 9) / z0) | 0);
         const py0: number = Pix3D.originY + (((y0 << 9) / z0) | 0);
@@ -2091,6 +2085,7 @@ export default class World {
 
     private renderGround(tileX: number, tileZ: number, ground: Ground, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number): void {
         let vertexCount: number = ground.vertexX.length;
+        let inFront: boolean = false;
 
         for (let i: number = 0; i < vertexCount; i++) {
             let x: number = ground.vertexX[i] - World.cx;
@@ -2105,8 +2100,10 @@ export default class World {
             z = (y * sinEyePitch + z * cosEyePitch) >> 16;
             y = tmp;
 
-            if (z < 50) {
-                return;
+            if (z >= NEAR_CLIP) {
+                inFront = true;
+            } else {
+                z = NEAR_CLIP;
             }
 
             if (ground.faceTexture) {
@@ -2117,6 +2114,10 @@ export default class World {
 
             Ground.drawVertexX[i] = Pix3D.originX + (((x << 9) / z) | 0);
             Ground.drawVertexY[i] = Pix3D.originY + (((y << 9) / z) | 0);
+        }
+
+        if (!inFront) {
+            return;
         }
 
         Pix3D.trans = 0;

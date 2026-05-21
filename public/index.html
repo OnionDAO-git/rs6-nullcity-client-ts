@@ -6,6 +6,17 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=0.7" />
 
+        <script>
+            (() => {
+                try {
+                    if (new URLSearchParams(window.location.search).get('layout') === 'resizable') {
+                        document.documentElement.dataset.layout = 'resizable';
+                    }
+                } catch (_e) {
+                }
+            })();
+        </script>
+
         <style>
             html {
                 touch-action: manipulation;
@@ -53,6 +64,22 @@
                 -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
                 z-index: -1;
                 image-rendering: pixelated;
+            }
+
+            html[data-layout="resizable"][data-frame="resizable"] body {
+                display: block;
+            }
+
+            html[data-layout="resizable"][data-frame="resizable"] center,
+            html[data-layout="resizable"][data-frame="resizable"] #game,
+            html[data-layout="resizable"][data-frame="resizable"] canvas {
+                width: 100vw;
+                height: 100vh;
+            }
+
+            html[data-layout="resizable"][data-frame="resizable"] canvas {
+                aspect-ratio: auto;
+                margin: 0;
             }
 
             html:-webkit-full-screen {

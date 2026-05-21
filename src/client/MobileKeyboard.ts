@@ -1,4 +1,5 @@
 import { canvas, canvas2d } from '#/graphics/Canvas.js';
+import ClientLayout from '#/client/ClientLayout.js';
 
 // ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!"£$%^&*()-_=+[{]};:\'@#~,<.>/?\\| 
 // ^ Allowed characters in client
@@ -48,6 +49,9 @@ const DRAG_MIN_DIST_PX = 5;
 
 // How far a drag can move at most in one touch event.
 const DRAG_MAX_DIST_PX = 75;
+
+const DRAG_FRAME_WIDTH_PADDING = 24;
+const DRAG_FRAME_HEIGHT_PADDING = 29;
 
 interface KeyBox {
     startX: number;
@@ -169,7 +173,7 @@ class CanvasMobileKeyboard implements Keyboard {
     private height: number = (HEIGHT_PER_KEYBOX * 4) + 10;
     private width: number = (WIDTH_PER_KEYBOX * 10 + 10);
     private startX: number = 0;
-    private startY: number = 503 - this.height;
+    private startY: number = ClientLayout.current.frame.height - this.height;
     private mode: KeyboardMode = KeyboardMode.Regular;
     private animateBoxIndex: number = -1;
     private animateBoxTimeout: number = 0;
@@ -487,8 +491,9 @@ class CanvasMobileKeyboard implements Keyboard {
             // Dragged further than the minimum distance in one touch event.
             // Restrict movement such that the keyboard can't be repositioned out of sight
             // Otherwise, it's possible to make the keyboard unusable!
-            const newStartX = Math.max(0, Math.min(789 - this.width, x - this.touchStartAtX));
-            const newStartY = Math.max(0, Math.min(532 - this.height, y - this.touchStartAtY));
+            const frame = ClientLayout.current.frame;
+            const newStartX = Math.max(0, Math.min(frame.width + DRAG_FRAME_WIDTH_PADDING - this.width, x - this.touchStartAtX));
+            const newStartY = Math.max(0, Math.min(frame.height + DRAG_FRAME_HEIGHT_PADDING - this.height, y - this.touchStartAtY));
             this.startX = newStartX;
             this.startY = newStartY;
             // Focus event forces a re-draw of canvas

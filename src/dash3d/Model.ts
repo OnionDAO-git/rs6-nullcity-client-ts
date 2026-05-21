@@ -10,7 +10,7 @@ import PointNormal from '#/dash3d/PointNormal.js';
 import ModelSource from '#/dash3d/ModelSource.js';
 import type Js5 from '#/js5/Js5.js';
 
-const FAR_CLIP = 5000;
+const FAR_CLIP = 20000;
 
 export default class Model extends ModelSource {
     static loaded: number = 0;

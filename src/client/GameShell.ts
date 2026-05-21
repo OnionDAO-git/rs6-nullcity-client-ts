@@ -1,4 +1,5 @@
 import ClientKeyboardListener from '#/client/ClientKeyboardListener.js';
+import ClientLayout, { ClientLayoutMode, type ClientLayoutState } from '#/client/ClientLayout.js';
 
 import { canvas, canvas2d } from '#/graphics/Canvas.js';
 import Pix3D from '#/dash3d/Pix3D.js';
@@ -32,12 +33,20 @@ export default abstract class GameShell {
     static redrawNum = 0;
     static focus_in = true;
     static focus = false;
+    static readonly layoutMode: ClientLayoutMode = GameShell.detectLayoutMode();
+
+    private readonly handleWindowResize = (): void => {
+        if (ClientLayout.currentMode === ClientLayoutMode.Resizable) {
+            this.resizeToViewport();
+        }
+    };
 
     protected async maininit() { }
     protected mainquit() { }
     protected async mainloop() { }
     protected async mainredraw() { }
     protected refresh() { }
+    protected canvasResize(_state: ClientLayoutState) { }
 
     constructor() {
         try {
@@ -47,13 +56,15 @@ export default abstract class GameShell {
             }
 
             canvas.tabIndex = -1;
+            this.applyInitialLayout();
             canvas2d.fillStyle = 'black';
             canvas2d.fillRect(0, 0, canvas.width, canvas.height);
 
             GameShell.shell = this;
             GameShell.sWid = canvas.width;
             GameShell.sHei = canvas.height;
-        } catch {
+        } catch (e) {
+            console.error(e);
             this.error('crash');
         }
     }
@@ -66,11 +77,78 @@ export default abstract class GameShell {
         return canvas.height;
     }
 
-    protected resize(width: number, height: number) {
+    protected resize(width: number, height: number, notify: boolean = true) {
+        if (width === canvas.width && height === canvas.height) {
+            return;
+        }
+
         canvas.width = width;
         canvas.height = height;
+        GameShell.sWid = width;
+        GameShell.sHei = height;
         GameShell.drawArea = new PixMap(width, height);
         Pix3D.setRenderClipping();
+        GameShell.fullredraw = true;
+        GameShell.progressBar = null;
+        if (notify) {
+            this.canvasResize(ClientLayout.current);
+        }
+    }
+
+    private static detectLayoutMode(): ClientLayoutMode {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('layout') === ClientLayoutMode.Resizable) {
+                return ClientLayoutMode.Resizable;
+            }
+        } catch (_e) {
+            // Keep legacy mode if URL parsing is unavailable.
+        }
+
+        return ClientLayoutMode.Legacy;
+    }
+
+    private applyInitialLayout(): void {
+        if (GameShell.layoutMode !== ClientLayoutMode.Resizable) {
+            ClientLayout.useLegacy();
+            return;
+        }
+
+        document.documentElement.dataset.layout = ClientLayoutMode.Resizable;
+        document.documentElement.dataset.frame = ClientLayoutMode.Legacy;
+        ClientLayout.useLegacy();
+    }
+
+    static useLegacyFrame(notify: boolean = true): void {
+        ClientLayout.useLegacy();
+        if (GameShell.layoutMode === ClientLayoutMode.Resizable) {
+            document.documentElement.dataset.frame = ClientLayoutMode.Legacy;
+        }
+        const shell = GameShell.shell;
+        if (shell) {
+            shell.resize(ClientLayout.LEGACY_FRAME_WIDTH, ClientLayout.LEGACY_FRAME_HEIGHT, notify);
+        }
+    }
+
+    static useResizableFrame(notify: boolean = true): void {
+        if (GameShell.layoutMode !== ClientLayoutMode.Resizable) {
+            GameShell.useLegacyFrame(notify);
+            return;
+        }
+
+        const shell = GameShell.shell;
+        if (shell) {
+            document.documentElement.dataset.frame = ClientLayoutMode.Resizable;
+            shell.resizeToViewport(notify);
+        }
+    }
+
+    private resizeToViewport(notify: boolean = true): void {
+        const viewport = window.visualViewport;
+        const width = Math.max(ClientLayout.LEGACY_FRAME_WIDTH, Math.floor(viewport?.width ?? window.innerWidth));
+        const height = Math.max(ClientLayout.LEGACY_FRAME_HEIGHT, Math.floor(viewport?.height ?? window.innerHeight));
+        const state = ClientLayout.useResizable(width, height);
+        this.resize(state.frame.width, state.frame.height, notify);
     }
 
     public error(message: string): void {
@@ -92,6 +170,11 @@ export default abstract class GameShell {
         try {
             canvas.onfocus = this.onfocus.bind(this);
             canvas.onblur = this.onblur.bind(this);
+
+            if (GameShell.layoutMode === ClientLayoutMode.Resizable) {
+                window.addEventListener('resize', this.handleWindowResize, false);
+                window.visualViewport?.addEventListener('resize', this.handleWindowResize, false);
+            }
 
             if (this.isTouchDevice && !this.hasTouchEvents) {
                 // edge case: we can't control canvas touch action behavior to allow zooming
@@ -121,7 +204,8 @@ export default abstract class GameShell {
 
                 await this.mainredrawwrapper();
             }
-        } catch {
+        } catch (e) {
+            console.error(e);
             this.error('crash');
         }
 
@@ -144,6 +228,8 @@ export default abstract class GameShell {
         canvas.onblur = null;
         canvas.oncontextmenu = null;
         window.oncontextmenu = null;
+        window.removeEventListener('resize', this.handleWindowResize, false);
+        window.visualViewport?.removeEventListener('resize', this.handleWindowResize, false);
     }
 
     protected setFramerate(rate: number) {
