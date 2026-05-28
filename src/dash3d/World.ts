@@ -18,7 +18,7 @@ import Pix2D from '#/graphics/Pix2D.js';
 import Pix3D from '#/dash3d/Pix3D.js';
 import Model from '#/dash3d/Model.js';
 
-import { Int32Array3d, TypedArray1d, TypedArray2d, TypedArray3d, TypedArray4d } from '#/util/Arrays.js';
+import { Int32Array3d, TypedArray1d, TypedArray2d, TypedArray3d } from '#/util/Arrays.js';
 import type ModelSource from '#/dash3d/ModelSource.js';
 import type PointNormal from '#/dash3d/PointNormal.js';
 
@@ -81,15 +81,37 @@ const TEXTURE_AVERAGE = Uint16Array.of(
 );
 
 const OCCLUDER_LEVELS = 4;
-const VIEW_DISTANCE_TILES = 128;
+type VisibilityGrid = Uint8Array[];
+type VisibilityBacking = VisibilityGrid[][];
+
+const LEGACY_VIEW_DISTANCE_TILES = 128;
+const VIEW_DISTANCE_TILES = Math.max(LEGACY_VIEW_DISTANCE_TILES, (BuildArea.SIZE + 1) >> 1);
 const VIEW_DISTANCE_TILE_SPAN = VIEW_DISTANCE_TILES * 2;
 const VIS_BACKING_SIZE = VIEW_DISTANCE_TILE_SPAN + 1;
-const VIS_CALC_SIZE = VIS_BACKING_SIZE + 2;
-const FAR_CLIP = 20000;
+const VISIBILITY_DILATION_TILES = BuildArea.SCALE > 1 ? 3 : 1;
+const VIS_CALC_PADDING = VISIBILITY_DILATION_TILES;
+const VIS_CALC_SIZE = VIS_BACKING_SIZE + VIS_CALC_PADDING * 2;
+const OCCLUSION_CULLING_ENABLED = BuildArea.SCALE <= 1;
+const FAR_CLIP = Math.max(20000, VIEW_DISTANCE_TILES * 128 + 2048);
 const NEAR_CLIP = 50;
 
+function newVisibilityBacking(pitchLevels: number, yawLevels: number, sizeX: number, sizeZ: number): VisibilityBacking {
+    const backing: VisibilityBacking = new Array(pitchLevels);
+    for (let pitch = 0; pitch < pitchLevels; pitch++) {
+        backing[pitch] = new Array(yawLevels);
+        for (let yaw = 0; yaw < yawLevels; yaw++) {
+            const grid: VisibilityGrid = new Array(sizeX);
+            for (let x = 0; x < sizeX; x++) {
+                grid[x] = new Uint8Array(sizeZ);
+            }
+            backing[pitch][yaw] = grid;
+        }
+    }
+    return backing;
+}
+
 export default class World {
-    static lowMem: boolean = true;
+    static lowMem: boolean = false;
 
     private static cameraSinX: number = 0;
     private static cameraCosX: number = 0;
@@ -120,8 +142,8 @@ export default class World {
     static groundX: number = -1;
     static groundZ: number = -1;
 
-    private static visBacking: boolean[][][][] = new TypedArray4d(8, 32, VIS_BACKING_SIZE, VIS_BACKING_SIZE, false);
-    private static visBackingDirty: boolean[][] | null = null;
+    private static visBacking: VisibilityBacking = newVisibilityBacking(8, 32, VIS_BACKING_SIZE, VIS_BACKING_SIZE);
+    private static visBackingDirty: VisibilityGrid | null = null;
 
     static numActiveOccluders: number = 0;
     private static activeOccluders: (Occlude | null)[] = new TypedArray1d(500, null);
@@ -870,7 +892,7 @@ export default class World {
         this.xOrig = (viewportWidth / 2) | 0;
         this.yOrig = (viewportHeight / 2) | 0;
 
-        const visBacking: boolean[][][][] = new TypedArray4d(9, 32, VIS_CALC_SIZE, VIS_CALC_SIZE, false);
+        const visBacking: VisibilityBacking = newVisibilityBacking(9, 32, VIS_CALC_SIZE, VIS_CALC_SIZE);
         for (let pitch: number = 128; pitch <= 384; pitch += 32) {
             for (let yaw: number = 0; yaw < 2048; yaw += 64) {
                 this.cameraSinX = Pix3D.sinTable[pitch];
@@ -880,8 +902,8 @@ export default class World {
 
                 const pitchLevel: number = ((pitch - 128) / 32) | 0;
                 const yawLevel: number = (yaw / 64) | 0;
-                for (let dx: number = -VIEW_DISTANCE_TILES - 1; dx <= VIEW_DISTANCE_TILES + 1; dx++) {
-                    for (let dz: number = -VIEW_DISTANCE_TILES - 1; dz <= VIEW_DISTANCE_TILES + 1; dz++) {
+                for (let dx: number = -VIEW_DISTANCE_TILES - VIS_CALC_PADDING; dx <= VIEW_DISTANCE_TILES + VIS_CALC_PADDING; dx++) {
+                    for (let dz: number = -VIEW_DISTANCE_TILES - VIS_CALC_PADDING; dz <= VIEW_DISTANCE_TILES + VIS_CALC_PADDING; dz++) {
                         const x: number = dx * 128;
                         const z: number = dz * 128;
 
@@ -893,7 +915,7 @@ export default class World {
                             }
                         }
 
-                        visBacking[pitchLevel][yawLevel][dx + VIEW_DISTANCE_TILES + 1][dz + VIEW_DISTANCE_TILES + 1] = visible;
+                        visBacking[pitchLevel][yawLevel][dx + VIEW_DISTANCE_TILES + VIS_CALC_PADDING][dz + VIEW_DISTANCE_TILES + VIS_CALC_PADDING] = visible ? 1 : 0;
                     }
                 }
             }
@@ -905,31 +927,31 @@ export default class World {
                     for (let z: number = -VIEW_DISTANCE_TILES; z < VIEW_DISTANCE_TILES; z++) {
                         let visible: boolean = false;
 
-                        check_areas: for (let dx: number = -1; dx <= 1; dx++) {
-                            for (let dz: number = -1; dz <= 1; dz++) {
-                                if (visBacking[pitchLevel][yawLevel][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                        check_areas: for (let dx: number = -VISIBILITY_DILATION_TILES; dx <= VISIBILITY_DILATION_TILES; dx++) {
+                            for (let dz: number = -VISIBILITY_DILATION_TILES; dz <= VISIBILITY_DILATION_TILES; dz++) {
+                                if (visBacking[pitchLevel][yawLevel][x + dx + VIEW_DISTANCE_TILES + VIS_CALC_PADDING][z + dz + VIEW_DISTANCE_TILES + VIS_CALC_PADDING]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                                if (visBacking[pitchLevel][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + VIS_CALC_PADDING][z + dz + VIEW_DISTANCE_TILES + VIS_CALC_PADDING]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel + 1][yawLevel][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                                if (visBacking[pitchLevel + 1][yawLevel][x + dx + VIEW_DISTANCE_TILES + VIS_CALC_PADDING][z + dz + VIEW_DISTANCE_TILES + VIS_CALC_PADDING]) {
                                     visible = true;
                                     break check_areas;
                                 }
 
-                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + 1][z + dz + VIEW_DISTANCE_TILES + 1]) {
+                                if (visBacking[pitchLevel + 1][(yawLevel + 1) % 32][x + dx + VIEW_DISTANCE_TILES + VIS_CALC_PADDING][z + dz + VIEW_DISTANCE_TILES + VIS_CALC_PADDING]) {
                                     visible = true;
                                     break check_areas;
                                 }
                             }
                         }
 
-                        this.visBacking[pitchLevel][yawLevel][x + VIEW_DISTANCE_TILES][z + VIEW_DISTANCE_TILES] = visible;
+                        this.visBacking[pitchLevel][yawLevel][x + VIEW_DISTANCE_TILES][z + VIEW_DISTANCE_TILES] = visible ? 1 : 0;
                     }
                 }
             }
@@ -949,6 +971,31 @@ export default class World {
         const viewportX: number = this.xOrig + (((px << 9) / pz) | 0);
         const viewportY: number = this.yOrig + (((py << 9) / pz) | 0);
         return viewportX >= this.xClip && viewportX <= this.xClip2 && viewportY >= this.yClip && viewportY <= this.yClip2;
+    }
+
+    private static tileVisible(tileX: number, tileZ: number): boolean {
+        const vis: VisibilityGrid | null = World.visBackingDirty;
+        if (!vis) {
+            return false;
+        }
+
+        const baseX: number = tileX + VIEW_DISTANCE_TILES - World.gx;
+        const baseZ: number = tileZ + VIEW_DISTANCE_TILES - World.gz;
+
+        for (let dx: number = -1; dx <= 1; dx++) {
+            const row: Uint8Array | undefined = vis[baseX + dx];
+            if (!row) {
+                continue;
+            }
+
+            for (let dz: number = -1; dz <= 1; dz++) {
+                if (row[baseZ + dz]) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     updateMousePicking(mouseX: number, mouseY: number): void {
@@ -1018,7 +1065,7 @@ export default class World {
                         continue;
                     }
 
-                    if (tile.drawLevel <= maxLevel && (World.visBackingDirty[x + VIEW_DISTANCE_TILES - World.gx][z + VIEW_DISTANCE_TILES - World.gz] || this.groundh[level][x][z] - eyeY >= 2000)) {
+                    if (tile.drawLevel <= maxLevel && (World.tileVisible(x, z) || this.groundh[level][x][z] - eyeY >= 2000)) {
                         tile.drawFront = true;
                         tile.drawBack = true;
                         tile.drawSprites = tile.spriteCount > 0;
@@ -1245,6 +1292,11 @@ export default class World {
     }
 
     private calcOcclude(): void {
+        if (!OCCLUSION_CULLING_ENABLED) {
+            World.numActiveOccluders = 0;
+            return;
+        }
+
         const count: number = World.numOccluders[World.maxLevel];
         const occluders: (Occlude | null)[] = World.occluders[World.maxLevel];
 

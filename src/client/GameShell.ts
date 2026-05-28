@@ -98,14 +98,19 @@ export default abstract class GameShell {
     private static detectLayoutMode(): ClientLayoutMode {
         try {
             const params = new URLSearchParams(window.location.search);
-            if (params.get('layout') === ClientLayoutMode.Resizable) {
+            const layout = params.get('layout');
+            if (layout === ClientLayoutMode.Legacy) {
+                return ClientLayoutMode.Legacy;
+            }
+
+            if (layout === ClientLayoutMode.Resizable) {
                 return ClientLayoutMode.Resizable;
             }
         } catch (_e) {
-            // Keep legacy mode if URL parsing is unavailable.
+            // Keep the default mode if URL parsing is unavailable.
         }
 
-        return ClientLayoutMode.Legacy;
+        return ClientLayoutMode.Resizable;
     }
 
     private applyInitialLayout(): void {

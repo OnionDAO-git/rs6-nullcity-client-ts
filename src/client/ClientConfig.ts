@@ -1,19 +1,20 @@
-const BUILD_AREA_SCALE_KEY = 'rs6.mapBuildAreaScale';
+const BUILD_AREA_SCALE_KEY = 'rs6.mapBuildAreaScale.v2';
 const BUILD_AREA_SCALE_PARAM = 'buildAreaScale';
 
 export const MIN_BUILD_AREA_SCALE = 1;
 export const MAX_BUILD_AREA_SCALE = 4;
+export const DEFAULT_BUILD_AREA_SCALE = 2;
 
 function clampBuildAreaScale(value: number): number {
     if (!Number.isFinite(value)) {
-        return MIN_BUILD_AREA_SCALE;
+        return DEFAULT_BUILD_AREA_SCALE;
     }
 
     return Math.max(MIN_BUILD_AREA_SCALE, Math.min(MAX_BUILD_AREA_SCALE, value | 0));
 }
 
 function readBuildAreaScale(): number {
-    let value = MIN_BUILD_AREA_SCALE;
+    let value = DEFAULT_BUILD_AREA_SCALE;
 
     try {
         const params = new URLSearchParams(window.location.search);
@@ -29,7 +30,7 @@ function readBuildAreaScale(): number {
             value = clampBuildAreaScale(Number(stored));
         }
     } catch (_e) {
-        value = MIN_BUILD_AREA_SCALE;
+        value = DEFAULT_BUILD_AREA_SCALE;
     }
 
     return value;

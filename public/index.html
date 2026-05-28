@@ -9,10 +9,11 @@
         <script>
             (() => {
                 try {
-                    if (new URLSearchParams(window.location.search).get('layout') === 'resizable') {
+                    if (new URLSearchParams(window.location.search).get('layout') !== 'legacy') {
                         document.documentElement.dataset.layout = 'resizable';
                     }
                 } catch (_e) {
+                    document.documentElement.dataset.layout = 'resizable';
                 }
             })();
         </script>

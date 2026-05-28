@@ -199,10 +199,10 @@ async function serveStatic(req: Request): Promise<Response | undefined> {
   }
 }
 
-let server: Bun.Server<WebSocketData>;
+let server: Bun.Server;
 
 try {
-  server = Bun.serve<WebSocketData>({
+  server = Bun.serve<WebSocketData, {}>({
     hostname: listenHost,
     port: listenPort,
     async fetch(req, server) {
