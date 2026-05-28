@@ -31,7 +31,7 @@ export default class ClientBuild {
     static hueOff: number = ((Math.random() * 17.0) | 0) - 8;
     static ligOff: number = ((Math.random() * 33.0) | 0) - 16;
 
-    static lowMem: boolean = false;
+    static lowMem: boolean = true;
     static minusedlevel: number = 99;
     static lastBuiltLevel: number = 0;
 

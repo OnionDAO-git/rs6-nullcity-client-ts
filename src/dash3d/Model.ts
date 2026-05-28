@@ -2,7 +2,6 @@ import { AnimTransform } from '#/dash3d/AnimBase.js';
 import SeqType from '#/config/SeqType.js';
 import Pix2D from '#/graphics/Pix2D.js';
 import Pix3D from '#/dash3d/Pix3D.js';
-import { BuildArea } from '#/dash3d/CollisionMap.js';
 
 import Packet from '#/io/Packet.js';
 
@@ -11,7 +10,7 @@ import PointNormal from '#/dash3d/PointNormal.js';
 import ModelSource from '#/dash3d/ModelSource.js';
 import type Js5 from '#/js5/Js5.js';
 
-const FAR_CLIP = Math.max(20000, (((BuildArea.SIZE + 1) >> 1) * 128) + 2048);
+const FAR_CLIP = 20000;
 
 export default class Model extends ModelSource {
     static loaded: number = 0;

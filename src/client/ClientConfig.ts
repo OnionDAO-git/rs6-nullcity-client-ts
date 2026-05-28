@@ -1,9 +1,9 @@
-const BUILD_AREA_SCALE_KEY = 'rs6.mapBuildAreaScale.v2';
+const BUILD_AREA_SCALE_KEY = 'rs6.mapBuildAreaScale.legacy';
 const BUILD_AREA_SCALE_PARAM = 'buildAreaScale';
 
 export const MIN_BUILD_AREA_SCALE = 1;
 export const MAX_BUILD_AREA_SCALE = 4;
-export const DEFAULT_BUILD_AREA_SCALE = 2;
+export const DEFAULT_BUILD_AREA_SCALE = MIN_BUILD_AREA_SCALE;
 
 function clampBuildAreaScale(value: number): number {
     if (!Number.isFinite(value)) {

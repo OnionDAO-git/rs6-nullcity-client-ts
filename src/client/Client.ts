@@ -1627,7 +1627,7 @@ export class Client extends GameShell {
 
             const keyCount = ((this.psize - this.in.pos) / 16) | 0;
             this.mapBuildRadiusZones = this.inferMapBuildRadiusZones(centreZoneX, centreZoneZ, keyCount);
-            this.mapBuildLocalCoordBits = Client.mapBuildLocalCoordBitCount(this.mapBuildRadiusZones);
+            this.mapBuildLocalCoordBits = this.mapBuildRadiusZones > BuildArea.BASE_ZONE_RADIUS * 2 ? 9 : 7;
             this.mapKeys = new Array(keyCount);
             for (let i: number = 0; i < keyCount; i++) {
                 const key = new Int32Array(4);
@@ -1690,7 +1690,7 @@ export class Client extends GameShell {
         }
 
         this.mapBuildRadiusZones = BuildArea.BASE_ZONE_RADIUS;
-        this.mapBuildLocalCoordBits = Client.mapBuildLocalCoordBitCount(this.mapBuildRadiusZones);
+        this.mapBuildLocalCoordBits = 7;
         this.in.gBitStart();
         for (let levelIndex = 0; levelIndex < BuildArea.LEVELS; levelIndex++) {
             for (let zoneX = 0; zoneX < BuildArea.REGION_MODE_ZONES; zoneX++) {
@@ -1767,18 +1767,27 @@ export class Client extends GameShell {
         return width * height;
     }
 
-    private static mapBuildLocalCoordBitCount(radiusZones: number): number {
-        const sizeTiles = (radiusZones * 2 + 1) * 8;
-        return Math.ceil(Math.log2(sizeTiles));
-    }
-
     private inferMapBuildRadiusZones(centreZoneX: number, centreZoneZ: number, keyCount: number): number {
-        const expectedRegionCount = Client.regionCount(centreZoneX, centreZoneZ, BuildArea.RADIUS_ZONES);
-        if (keyCount !== expectedRegionCount) {
-            throw new Error(`REBUILD_NORMAL key count ${keyCount} does not match configured buildAreaScale=${BuildArea.SCALE}; expected ${expectedRegionCount}. Check the server loadedZoneScale.`);
+        let bestRadiusZones = BuildArea.BASE_ZONE_RADIUS;
+        let bestRegionCount = Client.regionCount(centreZoneX, centreZoneZ, bestRadiusZones);
+
+        for (let scale = 1; scale <= BuildArea.SCALE; scale++) {
+            const radiusZones = BuildArea.BASE_ZONE_RADIUS * scale;
+            const regionCount = Client.regionCount(centreZoneX, centreZoneZ, radiusZones);
+            if (regionCount === keyCount) {
+                return radiusZones;
+            }
+
+            if (regionCount <= keyCount && regionCount > bestRegionCount) {
+                bestRadiusZones = radiusZones;
+                bestRegionCount = regionCount;
+            }
         }
 
-        return BuildArea.RADIUS_ZONES;
+        if (bestRadiusZones !== BuildArea.RADIUS_ZONES) {
+            console.warn(`REBUILD_NORMAL key count ${keyCount} does not match configured buildAreaScale=${BuildArea.SCALE}; using ${bestRadiusZones / BuildArea.BASE_ZONE_RADIUS}x loaded-zone radius for this rebuild.`);
+        }
+        return bestRadiusZones;
     }
 
     private startRebuild(localZ: number, centreZoneZ: number, centreZoneX: number, localX: number, level: number): void {

@@ -111,7 +111,7 @@ function newVisibilityBacking(pitchLevels: number, yawLevels: number, sizeX: num
 }
 
 export default class World {
-    static lowMem: boolean = false;
+    static lowMem: boolean = true;
 
     private static cameraSinX: number = 0;
     private static cameraCosX: number = 0;

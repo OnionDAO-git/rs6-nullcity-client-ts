@@ -69,7 +69,7 @@ The first slice is intentionally behavior-preserving:
 - `World` scales the tile visibility/render span to the loaded terrain radius for high-resolution viewports, stores that visibility grid compactly, and uses matching far-clip increases in the world/model projection path.
 - High-memory scene building is the default so expanded views do not inherit low-memory floor/plane pruning artifacts.
 - The loaded terrain area can be expanded with matching client/server settings:
-  - Client: defaults to `2x`; `?buildAreaScale=1..4` or `?mapBuildAreaScale=1..4` can override it and the value persists in local storage.
+  - Client: defaults to legacy `1x`; `?buildAreaScale=1..4` or `?mapBuildAreaScale=1..4` can override it and the value persists in local storage.
   - Server: `loadedZoneScale` in `server-config.json`.
   - The client and server values must match for scaled terrain streaming. A rebuild packet with the wrong region count is treated as a configuration error instead of silently using a smaller loaded area.
   - `1x` preserves the legacy 13x13 zone build area. Higher values expand the centered radius; `4x` uses a 49x49 zone build area.
